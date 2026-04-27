@@ -22,3 +22,15 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+update.json
+scripts/_env.sh
+.vscode
+.tool-versions
+.idea
+.old
+.eslintcache
+.changelog_backups
+target
+CLAUDE.md
+.vfox.toml
+.vfox/
