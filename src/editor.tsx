@@ -1,9 +1,8 @@
 import { defaultValueCtx, Editor, rootCtx } from '@milkdown/kit/core';
-import type { FC } from 'react';
-
-import { Milkdown, useEditor } from '@milkdown/react'
 import { commonmark } from '@milkdown/kit/preset/commonmark';
+import { Milkdown, useEditor } from '@milkdown/react'
 import { nord } from '@milkdown/theme-nord';
+import type { FC } from 'react';
 
 import '@milkdown/theme-nord/style.css';
 
