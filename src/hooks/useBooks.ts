@@ -1,0 +1,44 @@
+import { useState, useCallback, useEffect } from 'react';
+
+import type { BookInfo } from '../types';
+import { listBooks, newBook as apiNewBook, deleteBook as apiDeleteBook, importBook as apiImportBook } from '../utils/commands';
+
+export function useBooks() {
+  const [books, setBooks] = useState<BookInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await listBooks();
+      setBooks(result);
+    } catch (e) {
+      console.error('Failed to list books:', e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const createBook = useCallback(async (title: string): Promise<BookInfo> => {
+    const book = await apiNewBook(title);
+    await refresh();
+    return book;
+  }, [refresh]);
+
+  const removeBook = useCallback(async (bookPath: string) => {
+    await apiDeleteBook(bookPath);
+    await refresh();
+  }, [refresh]);
+
+  const importExternalBook = useCallback(async (folderPath: string): Promise<BookInfo> => {
+    const book = await apiImportBook(folderPath);
+    await refresh();
+    return book;
+  }, [refresh]);
+
+  return { books, loading, refresh, createBook, removeBook, importExternalBook };
+}

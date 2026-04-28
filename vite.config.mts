@@ -22,11 +22,11 @@ export default ({ mode }) => {
       }),
     ],
     preview: {
-      port: Number(process.env.VITE_APP_PORT || 5005),
+      port: Number(process.env.VITE_APP_PORT || 1420),
     },
     server: {
       host: '0.0.0.0',
-      port: Number(process.env.VITE_APP_PORT || 5005),
+      port: Number(process.env.VITE_APP_PORT || 1420),
     },
     base: process.env.NODE_ENV === 'production' ? process.env.VITE_BASENAME : '/',
   });
