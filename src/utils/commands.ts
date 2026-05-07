@@ -77,3 +77,27 @@ export function gitCommit(bookPath: string, message: string): Promise<void> {
 export function gitLog(bookPath: string, maxCount?: number): Promise<CommitInfo[]> {
   return invoke('git_log', { bookPath, maxCount });
 }
+
+export function gitRemoteUrl(bookPath: string): Promise<string | null> {
+  return invoke('git_remote_url', { bookPath });
+}
+
+export function gitRemoteSetUrl(bookPath: string, url: string): Promise<void> {
+  return invoke('git_remote_set_url', { bookPath, url });
+}
+
+export function gitFetch(bookPath: string): Promise<string> {
+  return invoke('git_fetch', { bookPath });
+}
+
+export function gitPull(bookPath: string): Promise<string> {
+  return invoke('git_pull', { bookPath });
+}
+
+export function gitPush(bookPath: string): Promise<string> {
+  return invoke('git_push', { bookPath });
+}
+
+export function gitAheadBehind(bookPath: string): Promise<[number, number]> {
+  return invoke('git_ahead_behind', { bookPath });
+}

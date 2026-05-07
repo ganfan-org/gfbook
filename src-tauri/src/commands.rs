@@ -584,3 +584,33 @@ pub fn git_commit(book_path: String, message: String) -> Result<(), String> {
 pub fn git_log(book_path: String, max_count: Option<u32>) -> Result<Vec<CommitInfo>, String> {
     git::git_log(&book_path, max_count.unwrap_or(20))
 }
+
+#[tauri::command]
+pub fn git_remote_url(book_path: String) -> Result<Option<String>, String> {
+    git::git_remote_url(&book_path)
+}
+
+#[tauri::command]
+pub fn git_remote_set_url(book_path: String, url: String) -> Result<(), String> {
+    git::git_remote_set_url(&book_path, &url)
+}
+
+#[tauri::command]
+pub fn git_fetch(book_path: String) -> Result<String, String> {
+    git::git_fetch(&book_path)
+}
+
+#[tauri::command]
+pub fn git_pull(book_path: String) -> Result<String, String> {
+    git::git_pull(&book_path)
+}
+
+#[tauri::command]
+pub fn git_push(book_path: String) -> Result<String, String> {
+    git::git_push(&book_path)
+}
+
+#[tauri::command]
+pub fn git_ahead_behind(book_path: String) -> Result<(u32, u32), String> {
+    git::git_ahead_behind(&book_path)
+}

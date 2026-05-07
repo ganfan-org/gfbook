@@ -39,11 +39,25 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
     moveUp,
     moveDown,
     moveChapterTo,
+    gitStatusText,
+    commit,
+    getRemoteUrl,
+    setRemoteUrl: setRemoteUrlApi,
+    fetchRemote,
+    pullRemote,
+    pushRemote,
+    getAheadBehind,
   } = useBook(bookPath);
 
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [addParentId, setAddParentId] = useState<string | null>(null);
   const [addTitle, setAddTitle] = useState('');
+  const [commitDialogOpen, setCommitDialogOpen] = useState(false);
+  const [commitMessage, setCommitMessage] = useState('');
+  const [remoteUrlState, setRemoteUrlState] = useState('');
+  const [remoteUrlDraft, setRemoteUrlDraft] = useState('');
+  const [syncOutput, setSyncOutput] = useState('');
+  const [syncing, setSyncing] = useState(false);
 
   const selectedChapter = useMemo(() => {
     if (!meta || !selectedChapterId) return null;
@@ -110,6 +124,17 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
     [renameChapterById],
   );
 
+  const handleCommit = useCallback(async () => {
+    if (!commitMessage.trim()) return;
+    try {
+      await commit(commitMessage.trim());
+      setCommitDialogOpen(false);
+      setCommitMessage('');
+    } catch (e) {
+      console.error('Failed to commit:', e);
+    }
+  }, [commitMessage, commit]);
+
   const handleMoveChapter = useCallback(
     async (chapterId: string, targetId: string | null, position: 'inner' | 'before' | 'after') => {
       console.log('[BookDetail] handleMoveChapter:', { chapterId, targetId, position });
@@ -163,6 +188,25 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
             />
           )}
         </Box>
+        <Box sx={{ p: 1.5, borderTop: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer' }}
+          onClick={async () => {
+            setCommitMessage('');
+            setSyncOutput('');
+            const url = await getRemoteUrl();
+            setRemoteUrlState(url || '');
+            setRemoteUrlDraft(url || '');
+            setCommitDialogOpen(true);
+          }}>
+          <Box
+            sx={{
+              width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+              bgcolor: gitStatusText ? 'warning.main' : 'success.main',
+            }}
+          />
+          <Typography variant="caption" color="text.secondary" sx={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {gitStatusText || 'clean'}
+          </Typography>
+        </Box>
       </Drawer>
 
       <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -187,6 +231,103 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
           </Box>
         )}
       </Box>
+
+      <Dialog open={commitDialogOpen} onClose={() => {
+        setCommitDialogOpen(false);
+        setSyncOutput('');
+      }} maxWidth="sm" fullWidth>
+        <DialogTitle>Git</DialogTitle>
+        <DialogContent>
+          <Typography variant="subtitle2" gutterBottom>Changes</Typography>
+          <Typography variant="body2" color="text.secondary" mb={2} sx={{ fontFamily: 'monospace', fontSize: '0.8rem', whiteSpace: 'pre-wrap' }}>
+            {gitStatusText || 'No changes'}
+          </Typography>
+
+          {gitStatusText && (
+            <>
+              <TextField
+                autoFocus
+                margin="dense"
+                label="Commit Message"
+                fullWidth
+                multiline
+                rows={2}
+                value={commitMessage}
+                onChange={(e) => setCommitMessage(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                    handleCommit();
+                  }
+                }}
+              />
+              <Box textAlign="right" mt={1} mb={2}>
+                <Button onClick={handleCommit} variant="contained" size="small" disabled={!commitMessage.trim()}>
+                  Commit
+                </Button>
+              </Box>
+            </>
+          )}
+
+          <Divider sx={{ my: 2 }} />
+
+          <Typography variant="subtitle2" gutterBottom>Remote</Typography>
+          {remoteUrlState && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5, fontFamily: 'monospace', fontSize: '0.75rem' }}>
+              current: {remoteUrlState}
+            </Typography>
+          )}
+          <TextField
+            size="small"
+            fullWidth
+            placeholder="https://github.com/user/repo.git"
+            value={remoteUrlDraft}
+            onChange={(e) => setRemoteUrlDraft(e.target.value)}
+            sx={{ mb: 1 }}
+          />
+          <Box display="flex" gap={1} mb={1}>
+            <Button size="small" variant="outlined" onClick={async () => {
+              try {
+                const url = await getRemoteUrl();
+                setRemoteUrlState(url || '');
+                setRemoteUrlDraft(url || '');
+              } catch { /* ignore */ }
+            }}>Load</Button>
+            <Button size="small" variant="outlined" onClick={async () => {
+              try {
+                await setRemoteUrlApi(remoteUrlDraft);
+                setRemoteUrlState(remoteUrlDraft);
+              } catch (e) { console.error(e); }
+            }}>Set URL</Button>
+          </Box>
+
+          <Box display="flex" gap={1} mb={1}>
+            <Button size="small" variant="outlined" disabled={syncing} onClick={async () => {
+              setSyncing(true); setSyncOutput('');
+              try { setSyncOutput(await fetchRemote()); } catch (e: any) { setSyncOutput(String(e)); }
+              setSyncing(false);
+            }}>Fetch</Button>
+            <Button size="small" variant="outlined" disabled={syncing} onClick={async () => {
+              setSyncing(true); setSyncOutput('');
+              try { setSyncOutput(await pullRemote()); } catch (e: any) { setSyncOutput(String(e)); }
+              setSyncing(false);
+            }}>Pull</Button>
+            <Button size="small" variant="outlined" disabled={syncing} onClick={async () => {
+              setSyncing(true); setSyncOutput('');
+              try { setSyncOutput(await pushRemote()); } catch (e: any) { setSyncOutput(String(e)); }
+              setSyncing(false);
+            }}>Push</Button>
+          </Box>
+
+          {syncOutput && (
+            <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.75rem', whiteSpace: 'pre-wrap', bgcolor: 'grey.100', p: 1, borderRadius: 1, mt: 1 }}>
+              {syncOutput}
+            </Typography>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setCommitDialogOpen(false); setSyncOutput(''); }}>Close</Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={addDialogOpen} onClose={() => setAddDialogOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>New Chapter</DialogTitle>

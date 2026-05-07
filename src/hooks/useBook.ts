@@ -14,6 +14,12 @@ import {
   gitStatus,
   gitCommit,
   gitLog,
+  gitRemoteUrl,
+  gitRemoteSetUrl,
+  gitFetch,
+  gitPull,
+  gitPush,
+  gitAheadBehind,
 } from '../utils/commands';
 
 export function useBook(bookPath: string | null) {
@@ -130,23 +136,46 @@ export function useBook(bookPath: string | null) {
     await refreshGitStatus();
   }, [bookPath, refreshGitStatus]);
 
+  const getRemoteUrl = useCallback(async (): Promise<string | null> => {
+    if (!bookPath) return null;
+    return gitRemoteUrl(bookPath);
+  }, [bookPath]);
+
+  const setRemoteUrl = useCallback(async (url: string): Promise<void> => {
+    if (!bookPath) throw new Error('No book selected');
+    await gitRemoteSetUrl(bookPath, url);
+  }, [bookPath]);
+
+  const fetchRemote = useCallback(async (): Promise<string> => {
+    if (!bookPath) throw new Error('No book selected');
+    const result = await gitFetch(bookPath);
+    await refreshGitStatus();
+    return result;
+  }, [bookPath, refreshGitStatus]);
+
+  const pullRemote = useCallback(async (): Promise<string> => {
+    if (!bookPath) throw new Error('No book selected');
+    const result = await gitPull(bookPath);
+    await refreshGitStatus();
+    return result;
+  }, [bookPath, refreshGitStatus]);
+
+  const pushRemote = useCallback(async (): Promise<string> => {
+    if (!bookPath) throw new Error('No book selected');
+    const result = await gitPush(bookPath);
+    await refreshGitStatus();
+    return result;
+  }, [bookPath, refreshGitStatus]);
+
+  const getAheadBehind = useCallback(async (): Promise<[number, number]> => {
+    if (!bookPath) return [0, 0];
+    return gitAheadBehind(bookPath);
+  }, [bookPath]);
+
   return {
-    meta,
-    loading,
-    selectedChapterId,
-    chapterContent,
-    gitStatusText,
-    commits,
-    selectChapter,
-    saveChapter,
-    createChapter,
-    removeChapter,
-    renameChapterById,
-    moveChapterTo,
-    moveUp,
-    moveDown,
-    commit,
-    refreshMeta,
-    refreshGitStatus,
+    meta, loading, selectedChapterId, chapterContent, gitStatusText, commits,
+    selectChapter, saveChapter, createChapter, removeChapter,
+    renameChapterById, moveChapterTo, moveUp, moveDown, commit, refreshMeta, refreshGitStatus,
+    getRemoteUrl, setRemoteUrl, fetchRemote, pullRemote, pushRemote, getAheadBehind,
   };
 }

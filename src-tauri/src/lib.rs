@@ -29,6 +29,12 @@ pub fn run() {
             git_status,
             git_commit,
             git_log,
+            git_remote_url,
+            git_remote_set_url,
+            git_fetch,
+            git_pull,
+            git_push,
+            git_ahead_behind,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
