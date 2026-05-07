@@ -1,12 +1,12 @@
-import { Editor, rootCtx, defaultValueCtx } from '@milkdown/core';
-import { listener, listenerCtx } from '@milkdown/plugin-listener';
-import { commonmark } from '@milkdown/preset-commonmark';
-import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react';
-import { nord } from '@milkdown/theme-nord';
+import { useEditor, EditorContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import MarkdownIt from 'markdown-it';
 import { Box, Typography } from '@mui/material';
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
+import { Markdown } from 'tiptap-markdown';
+import './ChapterEditor.css';
 
-import '@milkdown/theme-nord/style.css';
+const md = new MarkdownIt({ html: true, breaks: true, linkify: true });
 
 interface ChapterEditorProps {
   content: string;
@@ -14,37 +14,59 @@ interface ChapterEditorProps {
   onContentChange: (markdown: string) => void;
 }
 
-function MilkdownEditorInner({ content, onContentChange }: { content: string; onContentChange: (markdown: string) => void }) {
+function useTipTapEditor(content: string, onContentChange: (markdown: string) => void) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onChangeRef = useRef(onContentChange);
   onChangeRef.current = onContentChange;
 
-  useEditor(
-    (root) => {
-      return Editor.make()
-        .config(ctx => {
-          ctx.set(rootCtx, root);
-          ctx.set(defaultValueCtx, content);
-        })
-        .config(nord)
-        .use(commonmark)
-        .use(listener)
-        .config(ctx => {
-          ctx.get(listenerCtx).markdownUpdated((_ctx, markdown, _prevMarkdown) => {
-            if (debounceRef.current) clearTimeout(debounceRef.current);
-            debounceRef.current = setTimeout(() => {
-              onChangeRef.current(markdown);
-            }, 500);
-          });
-        });
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        heading: { levels: [1, 2, 3, 4, 5, 6] },
+      }),
+      Markdown.configure({
+        html: true,
+        tightLists: true,
+        tightListClass: 'tight',
+        bulletListMarker: '-',
+        linkify: true,
+        breaks: true,
+      }),
+    ],
+    content: content ? md.render(content) : '<p></p>',
+    editorProps: {
+      handleKeyDown(view, event) {
+        if (view.composing && (event.key === 'Enter' || event.key === ' ')) {
+          event.preventDefault();
+          return true;
+        }
+        return false;
+      },
+      attributes: {
+        class: 'gtbook-editor',
+      },
     },
-    [],
-  );
+    onUpdate: ({ editor: ed }) => {
+      const markdown = (ed.storage as any).markdown.getMarkdown();
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        onChangeRef.current(markdown);
+      }, 500);
+    },
+  });
 
-  return <Milkdown />;
+  return editor;
 }
 
 export default function ChapterEditor({ content, chapterTitle, onContentChange }: ChapterEditorProps) {
+  const editor = useTipTapEditor(content, onContentChange);
+
+  useEffect(() => {
+    return () => {
+      editor?.destroy();
+    };
+  }, [editor]);
+
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Box sx={{ px: 3, pt: 2, pb: 1, borderBottom: 1, borderColor: 'divider' }}>
@@ -52,10 +74,12 @@ export default function ChapterEditor({ content, chapterTitle, onContentChange }
           {chapterTitle || 'Select a chapter'}
         </Typography>
       </Box>
-      <Box sx={{ flex: 1, overflow: 'auto', p: 3 }}>
-        <MilkdownProvider>
-          <MilkdownEditorInner content={content} onContentChange={onContentChange} />
-        </MilkdownProvider>
+      <Box sx={{ flex: 1, overflow: 'auto' }}>
+        {editor ? (
+          <EditorContent editor={editor} />
+        ) : (
+          <Box sx={{ p: 4 }}><Typography color="text.secondary">Loading editor...</Typography></Box>
+        )}
       </Box>
     </Box>
   );

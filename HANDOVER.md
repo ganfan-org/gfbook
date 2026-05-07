@@ -12,7 +12,7 @@ GTBook 是一个本地知识库/书的管理桌面应用，每本书是一个 Gi
 | 前端框架 | React 19 + TypeScript |
 | 构建工具 | Vite 8 |
 | UI 库 | MUI (Material UI) 7 |
-| Markdown 编辑器 | Milkdown 7 (WYSIWYG) |
+| Markdown 编辑器 | TipTap + tiptap-markdown (基于 ProseMirror) |
 | YAML 解析 | serde_yaml (Rust) |
 | UUID | uuid v4 (Rust) |
 | Git | 通过 CLI 调用 git 命令 |
@@ -41,7 +41,8 @@ gtbook-tauri/
 │   │   └── useBook.ts            # 单书操作 (章节CRUD/拖拽/Git)
 │   ├── components/
 │   │   ├── ChapterTree.tsx       # 章节目录树 (递归渲染 + 鼠标拖拽)
-│   │   └── ChapterEditor.tsx     # Milkdown WYSIWYG 编辑器 (500ms 防抖保存)
+│   │   ├── ChapterEditor.tsx     # TipTap 编辑器 (500ms 防抖保存)
+│   │   └── ChapterEditor.css     # TipTap 编辑器样式
 │   └── pages/
 │       ├── BookShelf.tsx         # 首页：书列表 (新建/导入/删除)
 │       └── BookDetail.tsx        # 详情页：左侧目录 + 右侧编辑器
