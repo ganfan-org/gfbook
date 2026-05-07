@@ -18,6 +18,14 @@ export function renameBook(bookPath: string, newTitle: string): Promise<BookInfo
   return invoke('rename_book', { bookPath, newTitle });
 }
 
+export function getBooksDir(): Promise<string> {
+  return invoke('get_books_dir_info');
+}
+
+export function setBooksDir(dir: string): Promise<string> {
+  return invoke('set_books_dir', { dir });
+}
+
 export function importBook(folderPath: string): Promise<BookInfo> {
   return invoke('import_book', { folderPath });
 }

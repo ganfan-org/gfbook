@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 
 import type { BookInfo } from '../types';
-import { listBooks, newBook as apiNewBook, deleteBook as apiDeleteBook, renameBook as apiRenameBook, importBook as apiImportBook } from '../utils/commands';
+import { listBooks, newBook as apiNewBook, deleteBook as apiDeleteBook, renameBook as apiRenameBook, importBook as apiImportBook, getBooksDir as apiGetBooksDir, setBooksDir as apiSetBooksDir } from '../utils/commands';
 
 export function useBooks() {
   const [books, setBooks] = useState<BookInfo[]>([]);
@@ -45,6 +45,14 @@ export function useBooks() {
     await refresh();
     return book;
   }, [refresh]);
+
+  const getBooksDirectory = useCallback(async (): Promise<string> => {
+    return apiGetBooksDir();
+  }, []);
+
+  const changeBooksDirectory = useCallback(async (dir: string): Promise<void> => {
+    await apiSetBooksDir(dir);
+  }, []);
 
   return { books, loading, refresh, createBook, removeBook, changeBookName, importExternalBook };
 }

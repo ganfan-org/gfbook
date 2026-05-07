@@ -180,16 +180,19 @@ export default function BookShelf({ onOpenBook }: BookShelfProps) {
   };
 
   const handleImport = async () => {
+    console.log('[BookShelf] Open Book clicked');
     const selected = await open({
       directory: true,
       multiple: false,
       title: 'Select book folder',
     });
+    console.log('[BookShelf] dialog returned:', selected);
     if (selected) {
       try {
-        await importExternalBook(selected);
+        const result = await importExternalBook(selected);
+        console.log('[BookShelf] import success:', result);
       } catch (e) {
-        console.error('Failed to import book:', e);
+        console.error('[BookShelf] Failed to import book:', e);
       }
     }
   };
@@ -234,9 +237,9 @@ export default function BookShelf({ onOpenBook }: BookShelfProps) {
         <Typography variant="h4" fontWeight={700}>
           Library
         </Typography>
-        <Box display="flex" gap={1}>
+        <Box display="flex" gap={1} alignItems="center">
           <Button variant="outlined" startIcon={<FolderOpenIcon />} onClick={handleImport}>
-            Import
+            Open Book
           </Button>
           <Button variant="contained" startIcon={<AddIcon />} onClick={() => setNewDialogOpen(true)}>
             New Book

@@ -9,15 +9,140 @@ use crate::models::{BookInfo, BookMeta, Chapter, CommitInfo};
 
 const META_FILE: &str = "gtbook.yaml";
 const CHAPTERS_DIR: &str = "chapters";
+const CONFIG_FILE: &str = "gtbook-config.json";
 
-fn get_books_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+fn get_config_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     let data_dir = app_handle
         .path()
         .app_data_dir()
         .map_err(|e| format!("Failed to get app data dir: {}", e))?;
-    let books_dir = data_dir.join("books");
-    fs::create_dir_all(&books_dir).map_err(|e| format!("Failed to create books dir: {}", e))?;
-    Ok(books_dir)
+    Ok(data_dir.join(CONFIG_FILE))
+}
+
+fn load_config(app_handle: &tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let config_path = get_config_path(app_handle)?;
+    if config_path.exists() {
+        let content =
+            fs::read_to_string(&config_path).map_err(|e| format!("Failed to read config: {}", e))?;
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))
+    } else {
+        Ok(serde_json::json!({}))
+    }
+}
+
+fn save_config(app_handle: &tauri::AppHandle, config: &serde_json::Value) -> Result<(), String> {
+    let config_path = get_config_path(app_handle)?;
+    let content = serde_json::to_string_pretty(config)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+    fs::write(&config_path, &content).map_err(|e| format!("Failed to write config: {}", e))?;
+    Ok(())
+}
+
+fn default_books_dir() -> PathBuf {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join("gtbooks")
+}
+
+fn read_book_list(app_handle: &tauri::AppHandle) -> Result<Vec<BookInfo>, String> {
+    let config = load_config(app_handle).unwrap_or_default();
+    let paths: Vec<String> = config
+        .get("books")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut books: Vec<BookInfo> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for p in &paths {
+        let meta_path = PathBuf::from(p).join(META_FILE);
+        if !meta_path.exists() {
+            continue;
+        }
+        if let Ok(meta) = load_meta(p) {
+            seen.insert(p.clone());
+            books.push(BookInfo {
+                title: meta.title,
+                path: p.clone(),
+                created_time: meta.created_time,
+                updated_time: meta.updated_time,
+            });
+        }
+    }
+
+    // Also scan default dir for any books not yet in config
+    let default_dir = default_books_dir();
+    if default_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&default_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
+                }
+                let path_str = path.to_string_lossy().to_string();
+                if seen.contains(&path_str) {
+                    continue;
+                }
+                let meta_path = path.join(META_FILE);
+                if !meta_path.exists() {
+                    continue;
+                }
+                if let Ok(meta) = load_meta(&path_str) {
+                    books.push(BookInfo {
+                        title: meta.title,
+                        path: path_str.clone(),
+                        created_time: meta.created_time,
+                        updated_time: meta.updated_time,
+                    });
+                    seen.insert(path_str);
+                }
+            }
+        }
+    }
+
+    books.sort_by(|a, b| b.updated_time.cmp(&a.updated_time));
+    Ok(books)
+}
+
+fn add_to_book_list(app_handle: &tauri::AppHandle, path: &str) -> Result<(), String> {
+    let mut config = load_config(app_handle).unwrap_or_default();
+    let mut books: Vec<String> = config
+        .get("books")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_default();
+    if !books.iter().any(|b| b == path) {
+        books.push(path.to_string());
+    }
+    config["books"] = serde_json::json!(books);
+    save_config(app_handle, &config)
+}
+
+fn remove_from_book_list(app_handle: &tauri::AppHandle, path: &str) -> Result<(), String> {
+    let mut config = load_config(app_handle).unwrap_or_default();
+    let mut books: Vec<String> = config
+        .get("books")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_default();
+    books.retain(|b| b != path);
+    config["books"] = serde_json::json!(books);
+    save_config(app_handle, &config)
+}
+
+fn slugify(title: &str) -> String {
+    title
+        .to_lowercase()
+        .replace(' ', "-")
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+        .collect()
 }
 
 fn load_meta(book_path: &str) -> Result<BookMeta, String> {
@@ -100,46 +225,35 @@ fn find_chapter_mut<'a>(chapters: &'a mut [Chapter], id: &str) -> Option<&'a mut
 }
 
 #[tauri::command]
-pub fn list_books(app_handle: tauri::AppHandle) -> Result<Vec<BookInfo>, String> {
-    let books_dir = get_books_dir(&app_handle)?;
-    let mut books = Vec::new();
+pub fn get_books_dir_info(_app_handle: tauri::AppHandle) -> Result<String, String> {
+    let dir = default_books_dir();
+    fs::create_dir_all(&dir).ok();
+    Ok(dir.to_string_lossy().to_string())
+}
 
-    let entries = fs::read_dir(&books_dir).map_err(|e| format!("Failed to read books dir: {}", e))?;
-    for entry in entries {
-        let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let meta_path = path.join(META_FILE);
-        if !meta_path.exists() {
-            continue;
-        }
-        let path_str = path.to_string_lossy().to_string();
-        match load_meta(&path_str) {
-            Ok(meta) => books.push(BookInfo {
-                title: meta.title,
-                path: path_str,
-                created_time: meta.created_time,
-                updated_time: meta.updated_time,
-            }),
-            Err(_) => continue,
-        }
+#[tauri::command]
+pub fn set_books_dir(app_handle: tauri::AppHandle, dir: String) -> Result<String, String> {
+    let path = PathBuf::from(&dir);
+    if !path.is_absolute() {
+        return Err("Path must be absolute".to_string());
     }
+    let mut config = load_config(&app_handle)?;
+    config["books_dir"] = serde_json::json!(dir);
+    save_config(&app_handle, &config)?;
+    fs::create_dir_all(&path).map_err(|e| format!("Failed to create directory: {}", e))?;
+    Ok("".to_string())
+}
 
-    books.sort_by(|a, b| b.updated_time.cmp(&a.updated_time));
-    Ok(books)
+#[tauri::command]
+pub fn list_books(app_handle: tauri::AppHandle) -> Result<Vec<BookInfo>, String> {
+    read_book_list(&app_handle)
 }
 
 #[tauri::command]
 pub fn new_book(title: String, app_handle: tauri::AppHandle) -> Result<BookInfo, String> {
-    let books_dir = get_books_dir(&app_handle)?;
-    let folder_name = title
-        .to_lowercase()
-        .replace(' ', "-")
-        .chars()
-        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
-        .collect::<String>();
+    let books_dir = default_books_dir();
+    fs::create_dir_all(&books_dir).map_err(|e| format!("Failed to create books dir: {}", e))?;
+    let folder_name = slugify(&title);
     let book_path = books_dir.join(&folder_name);
 
     if book_path.exists() {
@@ -170,6 +284,8 @@ pub fn new_book(title: String, app_handle: tauri::AppHandle) -> Result<BookInfo,
     }
 
     let path_str = book_path.to_string_lossy().to_string();
+    add_to_book_list(&app_handle, &path_str)?;
+
     Ok(BookInfo {
         title,
         path: path_str,
@@ -179,12 +295,12 @@ pub fn new_book(title: String, app_handle: tauri::AppHandle) -> Result<BookInfo,
 }
 
 #[tauri::command]
-pub fn delete_book(book_path: String) -> Result<(), String> {
+pub fn delete_book(book_path: String, app_handle: tauri::AppHandle) -> Result<(), String> {
+    remove_from_book_list(&app_handle, &book_path)?;
     let path = PathBuf::from(&book_path);
-    if !path.exists() {
-        return Err("Book not found".to_string());
+    if path.exists() {
+        fs::remove_dir_all(&path).map_err(|e| format!("Failed to delete book: {}", e))?;
     }
-    fs::remove_dir_all(&path).map_err(|e| format!("Failed to delete book: {}", e))?;
     Ok(())
 }
 
@@ -204,7 +320,7 @@ pub fn rename_book(book_path: String, new_title: String) -> Result<BookInfo, Str
 }
 
 #[tauri::command]
-pub fn import_book(folder_path: String) -> Result<BookInfo, String> {
+pub fn import_book(folder_path: String, app_handle: tauri::AppHandle) -> Result<BookInfo, String> {
     let path = PathBuf::from(&folder_path);
     if !path.exists() {
         return Err("Path does not exist".to_string());
@@ -218,6 +334,7 @@ pub fn import_book(folder_path: String) -> Result<BookInfo, String> {
     }
     let path_str = path.to_string_lossy().to_string();
     let meta = load_meta(&path_str)?;
+    add_to_book_list(&app_handle, &path_str)?;
     Ok(BookInfo {
         title: meta.title,
         path: path_str,

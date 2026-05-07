@@ -15,6 +15,8 @@ pub fn run() {
             delete_book,
             rename_book,
             import_book,
+            get_books_dir_info,
+            set_books_dir,
             get_book_meta,
             read_chapter,
             write_chapter,
