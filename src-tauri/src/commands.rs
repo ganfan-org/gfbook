@@ -189,6 +189,21 @@ pub fn delete_book(book_path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn rename_book(book_path: String, new_title: String) -> Result<BookInfo, String> {
+    let mut meta = load_meta(&book_path)?;
+    meta.title = new_title;
+    save_meta(&book_path, &meta)?;
+
+    let path_str = PathBuf::from(&book_path).to_string_lossy().to_string();
+    Ok(BookInfo {
+        title: meta.title.clone(),
+        path: path_str,
+        created_time: meta.created_time,
+        updated_time: meta.updated_time,
+    })
+}
+
+#[tauri::command]
 pub fn import_book(folder_path: String) -> Result<BookInfo, String> {
     let path = PathBuf::from(&folder_path);
     if !path.exists() {

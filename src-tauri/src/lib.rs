@@ -13,6 +13,7 @@ pub fn run() {
             list_books,
             new_book,
             delete_book,
+            rename_book,
             import_book,
             get_book_meta,
             read_chapter,

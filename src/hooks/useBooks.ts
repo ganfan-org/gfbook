@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 
 import type { BookInfo } from '../types';
-import { listBooks, newBook as apiNewBook, deleteBook as apiDeleteBook, importBook as apiImportBook } from '../utils/commands';
+import { listBooks, newBook as apiNewBook, deleteBook as apiDeleteBook, renameBook as apiRenameBook, importBook as apiImportBook } from '../utils/commands';
 
 export function useBooks() {
   const [books, setBooks] = useState<BookInfo[]>([]);
@@ -40,5 +40,11 @@ export function useBooks() {
     return book;
   }, [refresh]);
 
-  return { books, loading, refresh, createBook, removeBook, importExternalBook };
+  const changeBookName = useCallback(async (bookPath: string, newTitle: string): Promise<BookInfo> => {
+    const book = await apiRenameBook(bookPath, newTitle);
+    await refresh();
+    return book;
+  }, [refresh]);
+
+  return { books, loading, refresh, createBook, removeBook, changeBookName, importExternalBook };
 }

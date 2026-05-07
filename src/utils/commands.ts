@@ -14,6 +14,10 @@ export function deleteBook(bookPath: string): Promise<void> {
   return invoke('delete_book', { bookPath });
 }
 
+export function renameBook(bookPath: string, newTitle: string): Promise<BookInfo> {
+  return invoke('rename_book', { bookPath, newTitle });
+}
+
 export function importBook(folderPath: string): Promise<BookInfo> {
   return invoke('import_book', { folderPath });
 }

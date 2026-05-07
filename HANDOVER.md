@@ -44,7 +44,7 @@ gtbook-tauri/
 │   │   ├── ChapterEditor.tsx     # TipTap 编辑器 (500ms 防抖保存)
 │   │   └── ChapterEditor.css     # TipTap 编辑器样式
 │   └── pages/
-│       ├── BookShelf.tsx         # 首页：书列表 (新建/导入/删除)
+│       ├── BookShelf.tsx         # 首页：iBooks 风格书架 (封面+网格布局)
 │       └── BookDetail.tsx        # 详情页：左侧目录 + 右侧编辑器
 ├── package.json
 ├── tsconfig.json
