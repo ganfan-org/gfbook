@@ -12,7 +12,7 @@ import {
   Button,
   TextField,
 } from '@mui/material';
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 
 import ChapterEditor from '../components/ChapterEditor';
 import ChapterTree from '../components/ChapterTree';
@@ -41,12 +41,15 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
     moveChapterTo,
     gitStatusText,
     commit,
+    autoCommit,
     getRemoteUrl,
     setRemoteUrl: setRemoteUrlApi,
     fetchRemote,
     pullRemote,
     pushRemote,
     getAheadBehind,
+    getUserConfig,
+    changeUserConfig,
   } = useBook(bookPath);
 
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -58,6 +61,30 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
   const [remoteUrlDraft, setRemoteUrlDraft] = useState('');
   const [syncOutput, setSyncOutput] = useState('');
   const [syncing, setSyncing] = useState(false);
+  const [gitName, setGitName] = useState('');
+  const [gitEmail, setGitEmail] = useState('');
+
+  // Auto-commit every 10 minutes
+  useEffect(() => {
+    const id = setInterval(() => {
+      autoCommit('auto-save');
+    }, 10 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [autoCommit]);
+
+  // Auto-commit on chapter switch
+  const prevChapterRef = useRef(selectedChapterId);
+  useEffect(() => {
+    if (prevChapterRef.current && prevChapterRef.current !== selectedChapterId) {
+      autoCommit('auto-save before switch');
+    }
+    prevChapterRef.current = selectedChapterId;
+  }, [selectedChapterId, autoCommit]);
+
+  // Auto-commit on unmount (app close / back to shelf)
+  useEffect(() => {
+    return () => { autoCommit('auto-save'); };
+  }, [autoCommit]);
 
   const selectedChapter = useMemo(() => {
     if (!meta || !selectedChapterId) return null;
@@ -195,6 +222,9 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
             const url = await getRemoteUrl();
             setRemoteUrlState(url || '');
             setRemoteUrlDraft(url || '');
+            const [name, email] = await getUserConfig();
+            setGitName(name);
+            setGitEmail(email);
             setCommitDialogOpen(true);
           }}>
           <Box
@@ -267,6 +297,24 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
               </Box>
             </>
           )}
+
+          <Divider sx={{ my: 2 }} />
+
+          <Typography variant="subtitle2" gutterBottom>Author</Typography>
+          <Box display="flex" gap={1} mb={2}>
+            <TextField size="small" label="Name" placeholder="Your Name"
+              value={gitName} onChange={(e) => setGitName(e.target.value)}
+              sx={{ flex: 1 }} />
+            <TextField size="small" label="Email" placeholder="you@example.com"
+              value={gitEmail} onChange={(e) => setGitEmail(e.target.value)}
+              sx={{ flex: 1 }} />
+            <Button size="small" variant="outlined" sx={{ mt: 0.5, alignSelf: 'flex-end' }}
+              onClick={async () => {
+                try { await changeUserConfig(gitName, gitEmail); } catch (e) { console.error(e); }
+              }}>
+              Save
+            </Button>
+          </Box>
 
           <Divider sx={{ my: 2 }} />
 

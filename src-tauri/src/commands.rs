@@ -614,3 +614,18 @@ pub fn git_push(book_path: String) -> Result<String, String> {
 pub fn git_ahead_behind(book_path: String) -> Result<(u32, u32), String> {
     git::git_ahead_behind(&book_path)
 }
+
+#[tauri::command]
+pub fn git_user_config(book_path: String) -> Result<(String, String), String> {
+    git::git_user_config(&book_path)
+}
+
+#[tauri::command]
+pub fn git_list_conflicted(book_path: String) -> Result<Vec<String>, String> {
+    git::git_list_conflicted(&book_path)
+}
+
+#[tauri::command]
+pub fn git_set_user_config(book_path: String, name: String, email: String) -> Result<(), String> {
+    git::git_set_user_config(&book_path, &name, &email)
+}

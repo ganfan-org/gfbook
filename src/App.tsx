@@ -1,5 +1,6 @@
 import { ThemeProvider, createTheme, CssBaseline } from '@mui/material';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 import BookDetail from './pages/BookDetail';
 import BookShelf from './pages/BookShelf';
@@ -18,6 +19,26 @@ const theme = createTheme({
 
 function App() {
   const [currentBookPath, setCurrentBookPath] = useState<string | null>(null);
+  const bookPathRef = useRef(currentBookPath);
+  bookPathRef.current = currentBookPath;
+
+  // Auto-commit on app close
+  useEffect(() => {
+    const unlisten = getCurrentWindow().onCloseRequested(async () => {
+      const path = bookPathRef.current;
+      if (!path) return;
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const status: string = await invoke('git_status', { bookPath: path });
+        if (status.trim()) {
+          await invoke('git_commit', { bookPath: path, message: 'auto-save before close' });
+        }
+      } catch (e) {
+        console.error('Auto-commit on close failed:', e);
+      }
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, []);
 
   return (
     <ThemeProvider theme={theme}>

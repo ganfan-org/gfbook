@@ -101,3 +101,15 @@ export function gitPush(bookPath: string): Promise<string> {
 export function gitAheadBehind(bookPath: string): Promise<[number, number]> {
   return invoke('git_ahead_behind', { bookPath });
 }
+
+export function gitUserConfig(bookPath: string): Promise<[string, string]> {
+  return invoke('git_user_config', { bookPath });
+}
+
+export function gitSetUserConfig(bookPath: string, name: string, email: string): Promise<void> {
+  return invoke('git_set_user_config', { bookPath, name, email });
+}
+
+export function gitListConflicted(bookPath: string): Promise<string[]> {
+  return invoke('git_list_conflicted', { bookPath });
+}

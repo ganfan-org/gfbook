@@ -35,6 +35,9 @@ pub fn run() {
             git_pull,
             git_push,
             git_ahead_behind,
+            git_user_config,
+            git_set_user_config,
+            git_list_conflicted,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

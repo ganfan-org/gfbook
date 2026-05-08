@@ -20,6 +20,8 @@ import {
   gitPull,
   gitPush,
   gitAheadBehind,
+  gitUserConfig,
+  gitSetUserConfig,
 } from '../utils/commands';
 
 export function useBook(bookPath: string | null) {
@@ -136,6 +138,15 @@ export function useBook(bookPath: string | null) {
     await refreshGitStatus();
   }, [bookPath, refreshGitStatus]);
 
+  const autoCommit = useCallback(async (message: string) => {
+    if (!bookPath) return;
+    // Only commit if there are changes
+    const status = await gitStatus(bookPath);
+    if (!status.trim()) return;
+    await gitCommit(bookPath, message);
+    await refreshGitStatus();
+  }, [bookPath, refreshGitStatus]);
+
   const getRemoteUrl = useCallback(async (): Promise<string | null> => {
     if (!bookPath) return null;
     return gitRemoteUrl(bookPath);
@@ -172,10 +183,21 @@ export function useBook(bookPath: string | null) {
     return gitAheadBehind(bookPath);
   }, [bookPath]);
 
+  const getUserConfig = useCallback(async (): Promise<[string, string]> => {
+    if (!bookPath) return ['', ''];
+    return gitUserConfig(bookPath);
+  }, [bookPath]);
+
+  const changeUserConfig = useCallback(async (name: string, email: string): Promise<void> => {
+    if (!bookPath) throw new Error('No book selected');
+    await gitSetUserConfig(bookPath, name, email);
+  }, [bookPath]);
+
   return {
     meta, loading, selectedChapterId, chapterContent, gitStatusText, commits,
     selectChapter, saveChapter, createChapter, removeChapter,
-    renameChapterById, moveChapterTo, moveUp, moveDown, commit, refreshMeta, refreshGitStatus,
+    renameChapterById, moveChapterTo, moveUp, moveDown, commit, autoCommit, refreshMeta, refreshGitStatus,
     getRemoteUrl, setRemoteUrl, fetchRemote, pullRemote, pushRemote, getAheadBehind,
+    getUserConfig, changeUserConfig,
   };
 }
