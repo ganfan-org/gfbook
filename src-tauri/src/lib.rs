@@ -38,6 +38,10 @@ pub fn run() {
             git_user_config,
             git_set_user_config,
             git_list_conflicted,
+            read_file_base64,
+            read_image_as_data_url,
+            save_image_to_book,
+            save_image_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

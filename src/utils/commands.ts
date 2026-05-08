@@ -113,3 +113,7 @@ export function gitSetUserConfig(bookPath: string, name: string, email: string):
 export function gitListConflicted(bookPath: string): Promise<string[]> {
   return invoke('git_list_conflicted', { bookPath });
 }
+
+export function readFileBase64(path: string): Promise<string> {
+  return invoke('read_file_base64', { path });
+}

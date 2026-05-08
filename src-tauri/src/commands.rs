@@ -616,6 +616,120 @@ pub fn git_ahead_behind(book_path: String) -> Result<(u32, u32), String> {
 }
 
 #[tauri::command]
+pub fn read_file_base64(path: String) -> Result<String, String> {
+    let data = fs::read(&path).map_err(|e| format!("Failed to read file: {}", e))?;
+    Ok(base64_encode(&data))
+}
+
+#[tauri::command]
+pub fn read_image_as_data_url(book_path: String, rel_path: String) -> Result<String, String> {
+    let full_path = PathBuf::from(&book_path).join(&rel_path);
+    let data = fs::read(&full_path).map_err(|e| format!("Failed to read image: {}", e))?;
+    let ext = full_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png")
+        .to_lowercase();
+    let mime = match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        _ => "image/png",
+    };
+    let b64 = base64_encode(&data);
+    Ok(format!("data:{};base64,{}", mime, b64))
+}
+
+fn base64_encode(data: &[u8]) -> String {
+    use std::fmt::Write;
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::new();
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        result.push(CHARS[((triple >> 18) & 0x3F) as usize] as char);
+        result.push(CHARS[((triple >> 12) & 0x3F) as usize] as char);
+        if chunk.len() > 1 {
+            result.push(CHARS[((triple >> 6) & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+        if chunk.len() > 2 {
+            result.push(CHARS[(triple & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+    }
+    result
+}
+
+#[tauri::command]
+pub fn save_image_data(book_path: String, data_base64: String, ext: String) -> Result<String, String> {
+    let assets_dir = PathBuf::from(&book_path).join("assets");
+    fs::create_dir_all(&assets_dir)
+        .map_err(|e| format!("Failed to create assets dir: {}", e))?;
+
+    let filename = format!("{}.{}", Uuid::new_v4(), ext);
+    let dest = assets_dir.join(&filename);
+
+    let bytes = base64_decode(&data_base64)?;
+    fs::write(&dest, &bytes).map_err(|e| format!("Failed to write image: {}", e))?;
+
+    Ok(format!("assets/{}", filename))
+}
+
+fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let clean: String = input.chars().filter(|c| *c != '=' && !c.is_whitespace()).collect();
+    let mut result = Vec::new();
+    let bytes: Vec<u8> = clean.bytes().collect();
+    for chunk in bytes.chunks(4) {
+        if chunk.len() < 4 {
+            break;
+        }
+        let mut val = 0u32;
+        for &b in chunk {
+            if let Some(pos) = CHARS.iter().position(|&c| c == b) {
+                val = (val << 6) | pos as u32;
+            }
+        }
+        let shift = (4 - chunk.len()) * 6;
+        val >>= shift;
+        result.push((val >> 16) as u8);
+        if chunk.len() > 2 {
+            result.push((val >> 8) as u8);
+        }
+        if chunk.len() > 3 {
+            result.push(val as u8);
+        }
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn save_image_to_book(book_path: String, source_path: String) -> Result<String, String> {
+    let assets_dir = PathBuf::from(&book_path).join("assets");
+    fs::create_dir_all(&assets_dir)
+        .map_err(|e| format!("Failed to create assets dir: {}", e))?;
+
+    let ext = PathBuf::from(&source_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png")
+        .to_lowercase();
+    let filename = format!("{}.{}", Uuid::new_v4(), ext);
+    let dest = assets_dir.join(&filename);
+
+    fs::copy(&source_path, &dest)
+        .map_err(|e| format!("Failed to copy image: {}", e))?;
+
+    Ok(format!("assets/{}", filename))
+}
+
+#[tauri::command]
 pub fn git_user_config(book_path: String) -> Result<(String, String), String> {
     git::git_user_config(&book_path)
 }

@@ -243,6 +243,7 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
         {selectedChapter ? (
           <ChapterEditor
             key={selectedChapter.id}
+            bookPath={bookPath}
             content={chapterContent}
             chapterTitle={selectedChapter.title}
             onContentChange={handleSaveContent}
