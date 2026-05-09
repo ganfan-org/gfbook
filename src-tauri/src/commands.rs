@@ -5,7 +5,8 @@ use tauri::Manager;
 use uuid::Uuid;
 
 use crate::git;
-use crate::models::{BookInfo, BookMeta, Chapter, CommitInfo};
+use crate::library;
+use crate::models::{BookInfo, BookMeta, Chapter, CommitInfo, SyncConfig};
 
 const META_FILE: &str = "gtbook.yaml";
 const CHAPTERS_DIR: &str = "chapters";
@@ -35,10 +36,25 @@ fn save_config(app_handle: &tauri::AppHandle, config: &serde_json::Value) -> Res
     let content = serde_json::to_string_pretty(config)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
     fs::write(&config_path, &content).map_err(|e| format!("Failed to write config: {}", e))?;
+
+    // Auto-sync to iCloud/sync path if enabled
+    if let Some(sync_config) = load_sync_config(app_handle).unwrap_or(None) {
+        if sync_config.enabled {
+            if let Err(e) = library::sync_to_path(&sync_config, &content) {
+                eprintln!("Warning: failed to sync config to path: {}", e);
+            }
+        }
+    }
+
     Ok(())
 }
 
-fn default_books_dir() -> PathBuf {
+fn default_books_dir(app_handle: &tauri::AppHandle) -> PathBuf {
+    if let Ok(config) = load_config(app_handle) {
+        if let Some(dir) = config.get("books_dir").and_then(|v| v.as_str()) {
+            return PathBuf::from(dir);
+        }
+    }
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .unwrap_or_else(|_| ".".to_string());
@@ -77,7 +93,7 @@ fn read_book_list(app_handle: &tauri::AppHandle) -> Result<Vec<BookInfo>, String
     }
 
     // Also scan default dir for any books not yet in config
-    let default_dir = default_books_dir();
+    let default_dir = default_books_dir(app_handle);
     if default_dir.exists() {
         if let Ok(entries) = fs::read_dir(&default_dir) {
             for entry in entries.flatten() {
@@ -225,8 +241,8 @@ fn find_chapter_mut<'a>(chapters: &'a mut [Chapter], id: &str) -> Option<&'a mut
 }
 
 #[tauri::command]
-pub fn get_books_dir_info(_app_handle: tauri::AppHandle) -> Result<String, String> {
-    let dir = default_books_dir();
+pub fn get_books_dir_info(app_handle: tauri::AppHandle) -> Result<String, String> {
+    let dir = default_books_dir(&app_handle);
     fs::create_dir_all(&dir).ok();
     Ok(dir.to_string_lossy().to_string())
 }
@@ -251,7 +267,7 @@ pub fn list_books(app_handle: tauri::AppHandle) -> Result<Vec<BookInfo>, String>
 
 #[tauri::command]
 pub fn new_book(title: String, app_handle: tauri::AppHandle) -> Result<BookInfo, String> {
-    let books_dir = default_books_dir();
+    let books_dir = default_books_dir(&app_handle);
     fs::create_dir_all(&books_dir).map_err(|e| format!("Failed to create books dir: {}", e))?;
     let folder_name = slugify(&title);
     let book_path = books_dir.join(&folder_name);
@@ -613,4 +629,79 @@ pub fn git_push(book_path: String) -> Result<String, String> {
 #[tauri::command]
 pub fn git_ahead_behind(book_path: String) -> Result<(u32, u32), String> {
     git::git_ahead_behind(&book_path)
+}
+
+fn load_sync_config(app_handle: &tauri::AppHandle) -> Result<Option<SyncConfig>, String> {
+    let config = load_config(app_handle).unwrap_or_default();
+    let sync_val = config.get("sync");
+    match sync_val {
+        Some(v) => serde_json::from_value(v.clone())
+            .map(Some)
+            .map_err(|e| format!("Failed to parse sync config: {}", e)),
+        None => Ok(None),
+    }
+}
+
+fn save_sync_config(app_handle: &tauri::AppHandle, sync_config: &SyncConfig) -> Result<(), String> {
+    let mut config = load_config(app_handle).unwrap_or_default();
+    config["sync"] = serde_json::to_value(sync_config)
+        .map_err(|e| format!("Failed to serialize sync config: {}", e))?;
+    save_config(app_handle, &config)
+}
+
+#[tauri::command]
+pub fn get_sync_config(app_handle: tauri::AppHandle) -> Result<Option<SyncConfig>, String> {
+    load_sync_config(&app_handle)
+}
+
+#[tauri::command]
+pub fn set_sync_config(app_handle: tauri::AppHandle, enabled: bool, path: String) -> Result<SyncConfig, String> {
+    let sync_config = SyncConfig { enabled, path };
+    save_sync_config(&app_handle, &sync_config)?;
+    Ok(sync_config)
+}
+
+/// Manual sync: read config from sync path, merge with local, save
+#[tauri::command]
+pub fn sync_now(app_handle: tauri::AppHandle) -> Result<String, String> {
+    let sync_config = load_sync_config(&app_handle)?
+        .ok_or_else(|| "Sync not configured. Set up sync first.".to_string())?;
+    if !sync_config.enabled {
+        return Err("Sync is disabled".to_string());
+    }
+
+    let remote_content = library::sync_from_path(&sync_config)?;
+    match remote_content {
+        Some(content) => {
+            let remote_config: serde_json::Value =
+                serde_json::from_str(&content).map_err(|e| format!("Failed to parse remote config: {}", e))?;
+            let local_config = load_config(&app_handle).unwrap_or_default();
+            let merged = library::merge_configs(&local_config, &remote_config);
+            save_config(&app_handle, &merged)?;
+
+            let remote_count = remote_config
+                .get("books")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            Ok(format!("Synced {} book(s) from remote", remote_count))
+        }
+        None => Ok("No remote config found at sync path".to_string()),
+    }
+}
+
+/// Initialize sync on app startup: merge remote config if sync is enabled
+pub fn init_sync(app_handle: &tauri::AppHandle) {
+    if let Ok(Some(sync_config)) = load_sync_config(app_handle) {
+        if sync_config.enabled {
+            if let Ok(Some(content)) = library::sync_from_path(&sync_config) {
+                if let Ok(remote_config) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Ok(local_config) = load_config(app_handle) {
+                        let merged = library::merge_configs(&local_config, &remote_config);
+                        let _ = save_config(app_handle, &merged);
+                    }
+                }
+            }
+        }
+    }
 }

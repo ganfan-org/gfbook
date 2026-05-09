@@ -26,3 +26,8 @@ export interface CommitInfo {
   author: string;
   timestamp: number;
 }
+
+export interface SyncConfig {
+  enabled: boolean;
+  path: string;
+}

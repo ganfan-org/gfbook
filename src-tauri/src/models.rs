@@ -38,3 +38,11 @@ pub struct CommitInfo {
     pub author: String,
     pub timestamp: u64,
 }
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SyncConfig {
+    pub enabled: bool,
+    pub path: String,
+}
+
+

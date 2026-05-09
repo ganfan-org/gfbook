@@ -1,8 +1,10 @@
 import AddIcon from '@mui/icons-material/Add';
+import CloudSyncIcon from '@mui/icons-material/CloudSync';
 import DeleteIcon from '@mui/icons-material/Delete';
 import DriveFileRenameOutlineIcon from '@mui/icons-material/DriveFileRenameOutline';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
+import SyncIcon from '@mui/icons-material/Sync';
 import {
   Box,
   Typography,
@@ -21,12 +23,16 @@ import {
   CardMedia,
   CardContent,
   CardActionArea,
+  Switch,
+  FormControlLabel,
+  Alert,
+  Tooltip,
 } from '@mui/material';
 import { open } from '@tauri-apps/plugin-dialog';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 import { useBooks } from '../hooks/useBooks';
-import type { BookInfo } from '../types';
+import type { BookInfo, SyncConfig } from '../types';
 
 interface BookShelfProps {
   onOpenBook: (bookPath: string) => void;
@@ -161,12 +167,35 @@ function BookCover({ title, onClick, onDelete, onRename }: { title: string; onCl
 }
 
 export default function BookShelf({ onOpenBook }: BookShelfProps) {
-  const { books, loading, createBook, removeBook, changeBookName, importExternalBook } = useBooks();
+  const { books, loading, createBook, removeBook, changeBookName, importExternalBook, getSyncConfig, updateSyncConfig, syncNow } = useBooks();
   const [newDialogOpen, setNewDialogOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<BookInfo | null>(null);
   const [renameTarget, setRenameTarget] = useState<BookInfo | null>(null);
   const [renameTitle, setRenameTitle] = useState('');
+  const [syncDialogOpen, setSyncDialogOpen] = useState(false);
+  const [syncEnabled, setSyncEnabled] = useState(false);
+  const [syncPath, setSyncPath] = useState('');
+  const [savedSyncConfig, setSavedSyncConfig] = useState<SyncConfig | null>(null);
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  useEffect(() => {
+    if (syncDialogOpen) {
+      (async () => {
+        const config = await getSyncConfig();
+        setSavedSyncConfig(config);
+        if (config) {
+          setSyncEnabled(config.enabled);
+          setSyncPath(config.path);
+        } else {
+          setSyncEnabled(false);
+          setSyncPath('');
+        }
+        setSyncMsg(null);
+      })();
+    }
+  }, [syncDialogOpen, getSyncConfig]);
 
   const handleCreate = async () => {
     if (!newTitle.trim()) return;
@@ -223,6 +252,26 @@ export default function BookShelf({ onOpenBook }: BookShelfProps) {
     }
   };
 
+  const handleSyncToggle = async (enabled: boolean) => {
+    setSyncEnabled(enabled);
+    try {
+      const config = await updateSyncConfig(enabled, syncPath);
+      setSavedSyncConfig(config);
+    } catch (e) {
+      console.error('Failed to update sync config:', e);
+    }
+  };
+
+  const handleSyncPathChange = async (path: string) => {
+    setSyncPath(path);
+    try {
+      const config = await updateSyncConfig(syncEnabled, path);
+      setSavedSyncConfig(config);
+    } catch (e) {
+      console.error('Failed to update sync config:', e);
+    }
+  };
+
   if (loading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="100vh">
@@ -240,6 +289,9 @@ export default function BookShelf({ onOpenBook }: BookShelfProps) {
         <Box display="flex" gap={1} alignItems="center">
           <Button variant="outlined" startIcon={<FolderOpenIcon />} onClick={handleImport}>
             Open Book
+          </Button>
+          <Button variant="outlined" startIcon={<CloudSyncIcon />} onClick={() => setSyncDialogOpen(true)}>
+            Sync
           </Button>
           <Button variant="contained" startIcon={<AddIcon />} onClick={() => setNewDialogOpen(true)}>
             New Book
@@ -338,6 +390,78 @@ export default function BookShelf({ onOpenBook }: BookShelfProps) {
           <Button onClick={handleDelete} color="error" variant="contained">
             Delete
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={syncDialogOpen} onClose={() => setSyncDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <CloudSyncIcon /> Sync Config
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+            {syncMsg && (
+              <Alert severity={syncMsg.type}>{syncMsg.text}</Alert>
+            )}
+
+            <Alert severity="info" sx={{ fontSize: '0.85rem' }}>
+              On macOS, set the path to an iCloud Drive file for automatic cross-device sync.
+              Config is auto-synced when you add/remove books.
+            </Alert>
+
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={syncEnabled}
+                  onChange={(e) => handleSyncToggle(e.target.checked)}
+                />
+              }
+              label="Enable iCloud / File Sync"
+            />
+
+            <TextField
+              label="Sync File Path"
+              placeholder={
+                '~/Library/Mobile Documents/com~apple~CloudDocs/gtbook-config.json'
+              }
+              helperText="Full path to the config file in your sync directory"
+              fullWidth
+              size="small"
+              value={syncPath}
+              disabled={!syncEnabled}
+              onChange={(e) => handleSyncPathChange(e.target.value)}
+            />
+
+            {savedSyncConfig && savedSyncConfig.enabled && (
+              <Typography variant="caption" color="text.secondary">
+                Path: {savedSyncConfig.path}
+              </Typography>
+            )}
+
+            <Button
+              variant="outlined"
+              startIcon={<SyncIcon />}
+              disabled={syncLoading || !syncEnabled || !syncPath.trim()}
+              onClick={async () => {
+                setSyncLoading(true);
+                setSyncMsg(null);
+                try {
+                  const result = await syncNow();
+                  setSyncMsg({ type: 'success', text: result });
+                } catch (e: unknown) {
+                  setSyncMsg({ type: 'error', text: String(e) });
+                } finally {
+                  setSyncLoading(false);
+                }
+              }}
+            >
+              Sync Now (Pull from Remote)
+            </Button>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSyncDialogOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
     </Box>

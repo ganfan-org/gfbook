@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 
-import type { BookInfo } from '../types';
-import { listBooks, newBook as apiNewBook, deleteBook as apiDeleteBook, renameBook as apiRenameBook, importBook as apiImportBook, getBooksDir as apiGetBooksDir, setBooksDir as apiSetBooksDir } from '../utils/commands';
+import type { BookInfo, SyncConfig } from '../types';
+import { listBooks, newBook as apiNewBook, deleteBook as apiDeleteBook, renameBook as apiRenameBook, importBook as apiImportBook, getBooksDir as apiGetBooksDir, setBooksDir as apiSetBooksDir, getSyncConfig as apiGetSyncConfig, setSyncConfig as apiSetSyncConfig, syncNow as apiSyncNow } from '../utils/commands';
 
 export function useBooks() {
   const [books, setBooks] = useState<BookInfo[]>([]);
@@ -54,5 +54,20 @@ export function useBooks() {
     await apiSetBooksDir(dir);
   }, []);
 
-  return { books, loading, refresh, createBook, removeBook, changeBookName, importExternalBook };
+  const getSyncConfig = useCallback(async (): Promise<SyncConfig | null> => {
+    return apiGetSyncConfig();
+  }, []);
+
+  const updateSyncConfig = useCallback(async (enabled: boolean, path: string): Promise<SyncConfig> => {
+    const config = await apiSetSyncConfig(enabled, path);
+    return config;
+  }, []);
+
+  const syncNow = useCallback(async (): Promise<string> => {
+    const result = await apiSyncNow();
+    await refresh();
+    return result;
+  }, [refresh]);
+
+  return { books, loading, refresh, createBook, removeBook, changeBookName, importExternalBook, getSyncConfig, updateSyncConfig, syncNow };
 }

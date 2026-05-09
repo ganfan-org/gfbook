@@ -1,5 +1,6 @@
 mod commands;
 mod git;
+mod library;
 mod models;
 
 use commands::*;
@@ -9,6 +10,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            init_sync(&app.handle());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             list_books,
             new_book,
@@ -35,6 +40,9 @@ pub fn run() {
             git_pull,
             git_push,
             git_ahead_behind,
+            get_sync_config,
+            set_sync_config,
+            sync_now,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

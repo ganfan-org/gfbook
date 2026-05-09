@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 
-import type { BookInfo, BookMeta, Chapter, CommitInfo } from '../types';
+import type { BookInfo, BookMeta, Chapter, CommitInfo, SyncConfig } from '../types';
 
 export function listBooks(): Promise<BookInfo[]> {
   return invoke('list_books');
@@ -100,4 +100,16 @@ export function gitPush(bookPath: string): Promise<string> {
 
 export function gitAheadBehind(bookPath: string): Promise<[number, number]> {
   return invoke('git_ahead_behind', { bookPath });
+}
+
+export function getSyncConfig(): Promise<SyncConfig | null> {
+  return invoke('get_sync_config');
+}
+
+export function setSyncConfig(enabled: boolean, path: string): Promise<SyncConfig> {
+  return invoke('set_sync_config', { enabled, path });
+}
+
+export function syncNow(): Promise<string> {
+  return invoke('sync_now');
 }
