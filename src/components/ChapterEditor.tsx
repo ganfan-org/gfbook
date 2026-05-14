@@ -2,8 +2,14 @@ import { invoke } from '@tauri-apps/api/core';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
+import FormatBoldIcon from '@mui/icons-material/FormatBold';
+import FormatItalicIcon from '@mui/icons-material/FormatItalic';
 import ImageIcon from '@mui/icons-material/Image';
-import { Box, IconButton, Typography, Tooltip } from '@mui/material';
+import TextFieldsIcon from '@mui/icons-material/TextFields';
+import LooksOneIcon from '@mui/icons-material/LooksOne';
+import LooksTwoIcon from '@mui/icons-material/LooksTwo';
+import Looks3Icon from '@mui/icons-material/Looks3';
+import { Box, IconButton, Tooltip, Typography } from '@mui/material';
 import { useEffect, useMemo, useRef } from 'react';
 import { Markdown } from 'tiptap-markdown';
 import MarkdownIt from 'markdown-it';
@@ -14,7 +20,6 @@ const md = new MarkdownIt({ html: true, breaks: true, linkify: true });
 
 interface ChapterEditorProps {
   content: string;
-  chapterTitle: string;
   bookPath: string;
   onContentChange: (markdown: string) => void;
 }
@@ -182,7 +187,7 @@ async function insertImage(editor: ReturnType<typeof useEditor>, bookPath: strin
   }
 }
 
-export default function ChapterEditor({ content, chapterTitle, bookPath, onContentChange }: ChapterEditorProps) {
+export default function ChapterEditor({ content, bookPath, onContentChange }: ChapterEditorProps) {
   const editor = useTipTapEditor(content, onContentChange, bookPath);
 
   useEffect(() => {
@@ -193,16 +198,55 @@ export default function ChapterEditor({ content, chapterTitle, bookPath, onConte
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <Box sx={{ px: 3, pt: 2, pb: 1, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 1 }}>
-        <Typography variant="h5" fontWeight={600} sx={{ flex: 1 }}>
-          {chapterTitle || 'Select a chapter'}
-        </Typography>
+      <Box sx={{ px: 1, py: 0.3, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 0.3, minHeight: 38, flexWrap: 'wrap' }}>
         {editor && (
-            <Tooltip title="Insert image (supports png, jpg, gif, webp)">
-            <IconButton size="small" onClick={() => insertImage(editor, bookPath)}>
-              <ImageIcon />
-            </IconButton>
-          </Tooltip>
+          <>
+            <Tooltip title="Paragraph">
+              <IconButton size="small" onClick={() => editor.chain().focus().setParagraph().run()}
+                color={editor.isActive('paragraph') ? 'primary' : 'default'}>
+                <TextFieldsIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Heading 1">
+              <IconButton size="small" onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
+                color={editor.isActive('heading', { level: 1 }) ? 'primary' : 'default'}>
+                <LooksOneIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Heading 2">
+              <IconButton size="small" onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+                color={editor.isActive('heading', { level: 2 }) ? 'primary' : 'default'}>
+                <LooksTwoIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Heading 3">
+              <IconButton size="small" onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
+                color={editor.isActive('heading', { level: 3 }) ? 'primary' : 'default'}>
+                <Looks3Icon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+
+            <Tooltip title="Bold">
+              <IconButton size="small" onClick={() => editor.chain().focus().toggleBold().run()}
+                color={editor.isActive('bold') ? 'primary' : 'default'}>
+                <FormatBoldIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Italic">
+              <IconButton size="small" onClick={() => editor.chain().focus().toggleItalic().run()}
+                color={editor.isActive('italic') ? 'primary' : 'default'}>
+                <FormatItalicIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+
+            <Box sx={{ flex: 1 }} />
+
+            <Tooltip title="Insert image">
+              <IconButton size="small" onClick={() => insertImage(editor, bookPath)}>
+                <ImageIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </>
         )}
       </Box>
       <Box sx={{ flex: 1, overflow: 'auto' }}>
