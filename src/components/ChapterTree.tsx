@@ -8,6 +8,10 @@ import {
   ListItemIcon,
   TextField,
   Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import FolderIcon from '@mui/icons-material/Folder';
 import DescriptionIcon from '@mui/icons-material/Description';
@@ -43,20 +47,12 @@ function ChapterItem(props: {
   onMoveChapter: (chapterId: string, targetId: string | null, position: 'inner' | 'before' | 'after') => void;
   dragOverId: string | null; dropPos: DropPos;
   onItemMouseDown: (e: React.MouseEvent, id: string) => void;
+  onRequestRename: (id: string, title: string) => void;
 }) {
-  const { chapter, depth, selectedId, onSelect, onAddChild, onRename, onDelete, onMoveUp, onMoveDown, dragOverId, dropPos, onItemMouseDown } = props;
+  const { chapter, depth, selectedId, onSelect, onAddChild, onRename, onDelete, onMoveUp, onMoveDown, dragOverId, dropPos, onItemMouseDown, onRequestRename } = props;
   const [expanded, setExpanded] = useState(true);
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
-  const [renaming, setRenaming] = useState(false);
-  const [renameValue, setRenameValue] = useState(chapter.title);
   const hasChildren = chapter.chapters.length > 0;
-
-  const handleRenameSubmit = () => {
-    if (renameValue.trim() && renameValue.trim() !== chapter.title) {
-      onRename(chapter.id, renameValue.trim());
-    }
-    setRenaming(false);
-  };
 
   const isOver = dragOverId === chapter.id;
 
@@ -101,24 +97,9 @@ function ChapterItem(props: {
           )}
         </Box>
 
-        {renaming ? (
-          <TextField
-            size="small" value={renameValue}
-            onChange={(e) => setRenameValue(e.target.value)}
-            onBlur={handleRenameSubmit}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleRenameSubmit();
-              if (e.key === 'Escape') setRenaming(false);
-            }}
-            autoFocus
-            sx={{ '& .MuiInputBase-input': { py: 0.3, px: 0.5, fontSize: '0.875rem' } }}
-            onClick={(e) => e.stopPropagation()}
-          />
-        ) : (
-          <Typography variant="body2" sx={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.875rem' }}>
-            {chapter.title}
-          </Typography>
-        )}
+        <Typography variant="body2" sx={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.875rem' }}>
+          {chapter.title}
+        </Typography>
 
         <IconButton size="small" onClick={(e) => { e.stopPropagation(); setMenuAnchor(e.currentTarget); }}
           sx={{ opacity: 0.4, '&:hover': { opacity: 1 }, ml: 0.5 }}>
@@ -129,7 +110,7 @@ function ChapterItem(props: {
           <MenuItem onClick={() => { setMenuAnchor(null); onAddChild(chapter.id); }}>
             <ListItemIcon><AddIcon fontSize="small" /></ListItemIcon>Add sub-chapter
           </MenuItem>
-          <MenuItem onClick={() => { setMenuAnchor(null); setRenaming(true); setRenameValue(chapter.title); }}>
+          <MenuItem onClick={() => { setMenuAnchor(null); onRequestRename(chapter.id, chapter.title); }}>
             <ListItemIcon><DriveFileRenameOutlineIcon fontSize="small" /></ListItemIcon>Rename
           </MenuItem>
           <MenuItem onClick={() => { setMenuAnchor(null); onDelete(chapter.id); }}>
@@ -149,6 +130,7 @@ function ChapterItem(props: {
               onMoveUp={onMoveUp} onMoveDown={onMoveDown} onMoveChapter={props.onMoveChapter}
               dragOverId={dragOverId} dropPos={dropPos}
               onItemMouseDown={onItemMouseDown}
+              onRequestRename={onRequestRename}
             />
           ))}
         </Box>
@@ -158,6 +140,9 @@ function ChapterItem(props: {
 }
 
 export default function ChapterTree({ chapters, selectedId, onSelect, onAddChild, onRename, onDelete, onMoveUp, onMoveDown, onMoveChapter }: ChapterTreeProps) {
+  const [renameDialog, setRenameDialog] = useState<{ id: string; title: string } | null>(null);
+  const [renameDialogValue, setRenameDialogValue] = useState('');
+
   const dragState = useRef<{
     sourceId: string;
     startX: number;
@@ -267,6 +252,13 @@ export default function ChapterTree({ chapters, selectedId, onSelect, onAddChild
     };
   }, []);
 
+  const handleRenameConfirm = () => {
+    if (renameDialog && renameDialogValue.trim() && renameDialogValue.trim() !== renameDialog.title) {
+      onRename(renameDialog.id, renameDialogValue.trim());
+    }
+    setRenameDialog(null);
+  };
+
   const renderChapterItems = (chaptersList: Chapter[], depth: number) => {
     return chaptersList.map((chapter) => (
       <ChapterItem key={chapter.id}
@@ -276,6 +268,7 @@ export default function ChapterTree({ chapters, selectedId, onSelect, onAddChild
         onMoveUp={onMoveUp} onMoveDown={onMoveDown} onMoveChapter={onMoveChapter}
         dragOverId={dragOverId} dropPos={dropPos}
         onItemMouseDown={handleItemMouseDown}
+        onRequestRename={(id, title) => { setRenameDialog({ id, title }); setRenameDialogValue(title); }}
       />
     ));
   };
@@ -294,6 +287,27 @@ export default function ChapterTree({ chapters, selectedId, onSelect, onAddChild
       ) : (
         renderChapterItems(chapters, 0)
       )}
+
+      <Dialog open={!!renameDialog} onClose={() => setRenameDialog(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Rename Chapter</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Chapter Title"
+            fullWidth
+            value={renameDialogValue}
+            onChange={(e) => setRenameDialogValue(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleRenameConfirm(); }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRenameDialog(null)}>Cancel</Button>
+          <Button onClick={handleRenameConfirm} variant="contained" disabled={!renameDialogValue.trim()}>
+            Rename
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

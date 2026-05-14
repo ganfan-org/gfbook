@@ -114,6 +114,10 @@ export function gitListConflicted(bookPath: string): Promise<string[]> {
   return invoke('git_list_conflicted', { bookPath });
 }
 
+export function revealInFinder(path: string): Promise<void> {
+  return invoke('reveal_in_finder', { path });
+}
+
 export function readFileBase64(path: string): Promise<string> {
   return invoke('read_file_base64', { path });
 }

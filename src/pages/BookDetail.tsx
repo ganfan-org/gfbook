@@ -1,4 +1,6 @@
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import InfoIcon from '@mui/icons-material/Info';
+import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import {
   Box,
   Drawer,
@@ -11,12 +13,14 @@ import {
   DialogActions,
   Button,
   TextField,
+  Tooltip,
 } from '@mui/material';
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 
 import ChapterEditor from '../components/ChapterEditor';
 import ChapterTree from '../components/ChapterTree';
 import { useBook } from '../hooks/useBook';
+import { revealInFinder } from '../utils/commands';
 import type { Chapter } from '../types';
 
 const DRAWER_WIDTH = 280;
@@ -63,6 +67,12 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
   const [syncing, setSyncing] = useState(false);
   const [gitName, setGitName] = useState('');
   const [gitEmail, setGitEmail] = useState('');
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [infoRemoteUrl, setInfoRemoteUrl] = useState('');
+  const [infoAhead, setInfoAhead] = useState(0);
+  const [infoBehind, setInfoBehind] = useState(0);
+  const [infoSyncing, setInfoSyncing] = useState(false);
+  const [infoOutput, setInfoOutput] = useState('');
 
   // Auto-commit every 10 minutes
   useEffect(() => {
@@ -195,9 +205,21 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
           <IconButton onClick={onBack} size="small">
             <ArrowBackIcon />
           </IconButton>
-          <Typography variant="h6" fontWeight={600} noWrap>
+          <Typography variant="h6" fontWeight={600} noWrap sx={{ flex: 1 }}>
             {meta?.title || 'Loading...'}
           </Typography>
+          <Tooltip title="Book info & settings">
+            <IconButton size="small" onClick={async () => {
+              const url = await getRemoteUrl();
+              setInfoRemoteUrl(url || '(not set)');
+              const [ahead, behind] = await getAheadBehind();
+              setInfoAhead(ahead);
+              setInfoBehind(behind);
+              setInfoOpen(true);
+            }}>
+              <InfoIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
         </Box>
         <Divider />
         <Box sx={{ flex: 1, overflow: 'auto', p: 1 }}>
@@ -262,6 +284,61 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
           </Box>
         )}
       </Box>
+
+      <Dialog open={infoOpen} onClose={() => setInfoOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Book Info</DialogTitle>
+        <DialogContent>
+          <Typography variant="subtitle2" gutterBottom>Storage</Typography>
+          <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.8rem', wordBreak: 'break-all', mb: 1 }}>
+            {bookPath}
+          </Typography>
+          <Button size="small" startIcon={<FolderOpenIcon />} variant="outlined" onClick={() => revealInFinder(bookPath)}>
+            {navigator.platform.includes('Win') ? 'Show in Explorer' : navigator.platform.includes('Mac') ? 'Reveal in Finder' : 'Open Folder'}
+          </Button>
+
+          <Divider sx={{ my: 2 }} />
+
+          <Typography variant="subtitle2" gutterBottom>Git Remote</Typography>
+          <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.8rem', mb: 1 }}>
+            {infoRemoteUrl}
+          </Typography>
+          <Box display="flex" gap={1} mb={1}>
+            <Typography variant="caption" color={infoAhead > 0 ? 'warning.main' : 'text.secondary'}>
+              {infoAhead} ahead
+            </Typography>
+            <Typography variant="caption" color={infoBehind > 0 ? 'warning.main' : 'text.secondary'}>
+              {infoBehind} behind
+            </Typography>
+          </Box>
+          <Box display="flex" gap={1}>
+            <Button size="small" variant="outlined" disabled={infoSyncing} onClick={async () => {
+              setInfoSyncing(true); setInfoOutput('');
+              try { const r = await fetchRemote(); setInfoOutput(r); } catch (e: any) { setInfoOutput(String(e)); }
+              const [a, b] = await getAheadBehind(); setInfoAhead(a); setInfoBehind(b);
+              setInfoSyncing(false);
+            }}>Fetch</Button>
+            <Button size="small" variant="outlined" disabled={infoSyncing} onClick={async () => {
+              setInfoSyncing(true); setInfoOutput('');
+              try { const r = await pullRemote(); setInfoOutput(r); } catch (e: any) { setInfoOutput(String(e)); }
+              const [a, b] = await getAheadBehind(); setInfoAhead(a); setInfoBehind(b);
+              setInfoSyncing(false);
+            }}>Pull</Button>
+            <Button size="small" variant="outlined" disabled={infoSyncing} onClick={async () => {
+              setInfoSyncing(true); setInfoOutput('');
+              try { const r = await pushRemote(); setInfoOutput(r); } catch (e: any) { setInfoOutput(String(e)); }
+              setInfoSyncing(false);
+            }}>Push</Button>
+          </Box>
+          {infoOutput && (
+            <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.75rem', whiteSpace: 'pre-wrap', bgcolor: 'grey.100', p: 1, borderRadius: 1, mt: 1 }}>
+              {infoOutput}
+            </Typography>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setInfoOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={commitDialogOpen} onClose={() => {
         setCommitDialogOpen(false);

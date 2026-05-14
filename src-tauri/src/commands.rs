@@ -667,6 +667,35 @@ fn base64_encode(data: &[u8]) -> String {
 }
 
 #[tauri::command]
+pub fn reveal_in_finder(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .args(["-R", &path])
+            .spawn()
+            .map_err(|e| format!("Failed to open: {}", e))?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .args(["/select,", &path])
+            .spawn()
+            .map_err(|e| format!("Failed to open: {}", e))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // Open parent directory
+        if let Some(parent) = std::path::Path::new(&path).parent() {
+            std::process::Command::new("xdg-open")
+                .arg(parent)
+                .spawn()
+                .map_err(|e| format!("Failed to open: {}", e))?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub fn save_image_data(book_path: String, data_base64: String, ext: String) -> Result<String, String> {
     let assets_dir = PathBuf::from(&book_path).join("assets");
     fs::create_dir_all(&assets_dir)
