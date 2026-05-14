@@ -4,13 +4,16 @@ import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
 import FormatBoldIcon from '@mui/icons-material/FormatBold';
 import FormatItalicIcon from '@mui/icons-material/FormatItalic';
+import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted';
+import FormatListNumberedIcon from '@mui/icons-material/FormatListNumbered';
 import ImageIcon from '@mui/icons-material/Image';
+import ListIcon from '@mui/icons-material/List';
 import TextFieldsIcon from '@mui/icons-material/TextFields';
 import LooksOneIcon from '@mui/icons-material/LooksOne';
 import LooksTwoIcon from '@mui/icons-material/LooksTwo';
 import Looks3Icon from '@mui/icons-material/Looks3';
 import { Box, IconButton, Tooltip, Typography } from '@mui/material';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Markdown } from 'tiptap-markdown';
 import MarkdownIt from 'markdown-it';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -189,6 +192,35 @@ async function insertImage(editor: ReturnType<typeof useEditor>, bookPath: strin
 
 export default function ChapterEditor({ content, bookPath, onContentChange }: ChapterEditorProps) {
   const editor = useTipTapEditor(content, onContentChange, bookPath);
+  const [tocOpen, setTocOpen] = useState(false);
+  const [tocItems, setTocItems] = useState<{ level: number; text: string; pos: number }[]>([]);
+  const [, forceUpdate] = useState(0);
+
+  // Re-render on selection change to update toolbar button highlights
+  useEffect(() => {
+    if (!editor) return;
+    const handler = () => forceUpdate((n) => n + 1);
+    editor.on('selectionUpdate', handler);
+    return () => { editor.off('selectionUpdate', handler); };
+  }, [editor]);
+
+  // Update TOC when editor content changes
+  useEffect(() => {
+    if (!editor || !tocOpen) return;
+    const update = () => {
+      const items: { level: number; text: string; pos: number }[] = [];
+      editor.state.doc.descendants((node, pos) => {
+        if (node.type.name === 'heading') {
+          const text = node.textContent;
+          if (text) items.push({ level: node.attrs.level, text, pos });
+        }
+      });
+      setTocItems(items);
+    };
+    update();
+    editor.on('update', update);
+    return () => { editor.off('update', update); };
+  }, [editor, tocOpen]);
 
   useEffect(() => {
     return () => {
@@ -207,19 +239,19 @@ export default function ChapterEditor({ content, bookPath, onContentChange }: Ch
                 <TextFieldsIcon fontSize="small" />
               </IconButton>
             </Tooltip>
-            <Tooltip title="Heading 1">
+            <Tooltip title="H1">
               <IconButton size="small" onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
                 color={editor.isActive('heading', { level: 1 }) ? 'primary' : 'default'}>
                 <LooksOneIcon fontSize="small" />
               </IconButton>
             </Tooltip>
-            <Tooltip title="Heading 2">
+            <Tooltip title="H2">
               <IconButton size="small" onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
                 color={editor.isActive('heading', { level: 2 }) ? 'primary' : 'default'}>
                 <LooksTwoIcon fontSize="small" />
               </IconButton>
             </Tooltip>
-            <Tooltip title="Heading 3">
+            <Tooltip title="H3">
               <IconButton size="small" onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
                 color={editor.isActive('heading', { level: 3 }) ? 'primary' : 'default'}>
                 <Looks3Icon fontSize="small" />
@@ -239,21 +271,87 @@ export default function ChapterEditor({ content, bookPath, onContentChange }: Ch
               </IconButton>
             </Tooltip>
 
-            <Box sx={{ flex: 1 }} />
+            <Tooltip title="Bullet list">
+              <IconButton size="small" onClick={() => editor.chain().focus().toggleBulletList().run()}
+                color={editor.isActive('bulletList') ? 'primary' : 'default'}>
+                <FormatListBulletedIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Ordered list">
+              <IconButton size="small" onClick={() => editor.chain().focus().toggleOrderedList().run()}
+                color={editor.isActive('orderedList') ? 'primary' : 'default'}>
+                <FormatListNumberedIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
 
             <Tooltip title="Insert image">
               <IconButton size="small" onClick={() => insertImage(editor, bookPath)}>
                 <ImageIcon fontSize="small" />
               </IconButton>
             </Tooltip>
+
+            <Box sx={{ flex: 1 }} />
+
+            <Tooltip title="Table of contents">
+              <IconButton size="small" onClick={() => setTocOpen(!tocOpen)}
+                color={tocOpen ? 'primary' : 'default'}>
+                <ListIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
           </>
         )}
       </Box>
-      <Box sx={{ flex: 1, overflow: 'auto' }}>
-        {editor ? (
-          <EditorContent editor={editor} />
-        ) : (
-          <Box sx={{ p: 4 }}><Typography color="text.secondary">Loading editor...</Typography></Box>
+
+      <Box sx={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        <Box sx={{ flex: 1, overflow: 'auto' }}>
+          {editor ? (
+            <EditorContent editor={editor} />
+          ) : (
+            <Box sx={{ p: 4 }}><Typography color="text.secondary">Loading editor...</Typography></Box>
+          )}
+        </Box>
+
+        {tocOpen && (
+          <Box
+            sx={{
+              width: 220,
+              flexShrink: 0,
+              borderLeft: 1,
+              borderColor: 'divider',
+              overflow: 'auto',
+              p: 1.5,
+              bgcolor: 'grey.50',
+            }}
+          >
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: 1 }}>
+              Contents
+            </Typography>
+            {tocItems.length === 0 ? (
+              <Typography variant="caption" color="text.secondary">No headings</Typography>
+            ) : (
+              tocItems.map((item, i) => (
+                <Box
+                  key={i}
+                  onClick={() => {
+                    editor?.commands.setTextSelection(item.pos);
+                    editor?.commands.focus();
+                  }}
+                  sx={{
+                    pl: item.level * 1.5,
+                    py: 0.4,
+                    cursor: 'pointer',
+                    borderRadius: 0.5,
+                    fontSize: '0.82rem',
+                    color: 'text.secondary',
+                    borderLeft: '2px solid transparent',
+                    '&:hover': { bgcolor: 'action.hover', color: 'text.primary', borderLeftColor: 'primary.main' },
+                  }}
+                >
+                  {item.text}
+                </Box>
+              ))
+            )}
+          </Box>
         )}
       </Box>
     </Box>
