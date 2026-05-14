@@ -6,8 +6,8 @@ export function listBooks(): Promise<BookInfo[]> {
   return invoke('list_books');
 }
 
-export function newBook(title: string): Promise<BookInfo> {
-  return invoke('new_book', { title });
+export function newBook(title: string, bookDir?: string): Promise<BookInfo> {
+  return invoke('new_book', { title, bookDir });
 }
 
 export function deleteBook(bookPath: string): Promise<void> {
@@ -116,6 +116,10 @@ export function gitListConflicted(bookPath: string): Promise<string[]> {
 
 export function revealInFinder(path: string): Promise<void> {
   return invoke('reveal_in_finder', { path });
+}
+
+export function pathExists(path: string): Promise<boolean> {
+  return invoke('path_exists', { path });
 }
 
 export function readFileBase64(path: string): Promise<string> {

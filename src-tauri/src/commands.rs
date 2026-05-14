@@ -249,16 +249,42 @@ pub fn list_books(app_handle: tauri::AppHandle) -> Result<Vec<BookInfo>, String>
     read_book_list(&app_handle)
 }
 
+fn validate_folder_name(name: &str) -> Result<(), String> {
+    if name.trim().is_empty() {
+        return Err("Folder name is empty".to_string());
+    }
+    if name.contains(|c: char| c.is_ascii_control() || c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|') {
+        return Err("Folder name contains invalid characters".to_string());
+    }
+    if name.starts_with('.') || name.ends_with('.') {
+        return Err("Folder name cannot start or end with a dot".to_string());
+    }
+    if name.len() > 255 {
+        return Err("Folder name too long".to_string());
+    }
+    Ok(())
+}
+
 #[tauri::command]
-pub fn new_book(title: String, app_handle: tauri::AppHandle) -> Result<BookInfo, String> {
-    let books_dir = default_books_dir();
-    fs::create_dir_all(&books_dir).map_err(|e| format!("Failed to create books dir: {}", e))?;
+pub fn new_book(title: String, app_handle: tauri::AppHandle, book_dir: Option<String>) -> Result<BookInfo, String> {
     let folder_name = slugify(&title);
-    let book_path = books_dir.join(&folder_name);
+    let book_path = match &book_dir {
+        Some(dir) => {
+            let p = PathBuf::from(dir);
+            if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                validate_folder_name(name)?;
+            }
+            p
+        }
+        None => default_books_dir().join(&folder_name),
+    };
 
     if book_path.exists() {
         return Err(format!("Book '{}' already exists", title));
     }
+
+    fs::create_dir_all(&book_path)
+        .map_err(|e| format!("Failed to create book directory: {}", e))?;
 
     fs::create_dir_all(&book_path)
         .map_err(|e| format!("Failed to create book directory: {}", e))?;
@@ -664,6 +690,11 @@ fn base64_encode(data: &[u8]) -> String {
         }
     }
     result
+}
+
+#[tauri::command]
+pub fn path_exists(path: String) -> Result<bool, String> {
+    Ok(PathBuf::from(&path).exists())
 }
 
 #[tauri::command]

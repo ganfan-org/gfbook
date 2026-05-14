@@ -43,6 +43,7 @@ pub fn run() {
             save_image_to_book,
             save_image_data,
             reveal_in_finder,
+            path_exists,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

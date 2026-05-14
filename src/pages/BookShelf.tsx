@@ -23,8 +23,8 @@ import {
   CardActionArea,
 } from '@mui/material';
 import { open } from '@tauri-apps/plugin-dialog';
-import { useState } from 'react';
-
+import { useState, useEffect } from 'react';
+import { getBooksDir, pathExists } from '../utils/commands';
 import { useBooks } from '../hooks/useBooks';
 import type { BookInfo } from '../types';
 
@@ -164,6 +164,23 @@ export default function BookShelf({ onOpenBook }: BookShelfProps) {
   const { books, loading, createBook, removeBook, changeBookName, importExternalBook } = useBooks();
   const [newDialogOpen, setNewDialogOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
+  const [newFolderName, setNewFolderName] = useState('');
+  const [newFolderError, setNewFolderError] = useState('');
+  const [newPathExists, setNewPathExists] = useState(false);
+  const [newParentDir, setNewParentDir] = useState('');
+
+  const INVALID_FOLDER_CHARS = /[<>:"/\\|?*\x00-\x1f]/g;
+  const INVALID_FOLDER_NAMES = ['', '.', '..', 'CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9', 'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'];
+
+  function validateFolderName(name: string): string {
+    if (!name.trim()) return 'Folder name is required';
+    if (INVALID_FOLDER_CHARS.test(name)) return 'Folder name cannot contain: < > : " / \\ | ? *';
+    if (name.startsWith('.') || name.endsWith('.')) return 'Folder name cannot start or end with a dot';
+    if (name.endsWith(' ') || name.endsWith('.')) return 'Folder name cannot end with space or dot';
+    if (INVALID_FOLDER_NAMES.includes(name.toUpperCase())) return `"${name}" is not allowed as a folder name`;
+    if (name.length > 255) return 'Folder name is too long (max 255 characters)';
+    return '';
+  }
   const [deleteConfirm, setDeleteConfirm] = useState<BookInfo | null>(null);
   const [renameTarget, setRenameTarget] = useState<BookInfo | null>(null);
   const [renameTitle, setRenameTitle] = useState('');
@@ -171,13 +188,32 @@ export default function BookShelf({ onOpenBook }: BookShelfProps) {
   const handleCreate = async () => {
     if (!newTitle.trim()) return;
     try {
-      await createBook(newTitle.trim());
+      const bookDir = `${newParentDir}/${newFolderName}`;
+      await createBook(newTitle.trim(), bookDir);
       setNewDialogOpen(false);
       setNewTitle('');
     } catch (e) {
       console.error('Failed to create book:', e);
     }
   };
+
+  useEffect(() => {
+    if (newDialogOpen) {
+      getBooksDir().then((dir) => {
+        setNewParentDir(dir);
+        setNewFolderName('');
+        setNewTitle('');
+        setNewPathExists(false);
+      });
+    }
+  }, [newDialogOpen]);
+
+  // Check if the target path already exists
+  useEffect(() => {
+    if (!newFolderName.trim() || !newParentDir.trim()) return;
+    const fullPath = `${newParentDir}/${newFolderName}`;
+    pathExists(fullPath).then(setNewPathExists);
+  }, [newFolderName, newParentDir]);
 
   const handleImport = async () => {
     console.log('[BookShelf] Open Book clicked');
@@ -284,7 +320,7 @@ export default function BookShelf({ onOpenBook }: BookShelfProps) {
         </Box>
       )}
 
-      <Dialog open={newDialogOpen} onClose={() => setNewDialogOpen(false)} maxWidth="xs" fullWidth>
+      <Dialog open={newDialogOpen} onClose={() => setNewDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>New Book</DialogTitle>
         <DialogContent>
           <TextField
@@ -293,13 +329,57 @@ export default function BookShelf({ onOpenBook }: BookShelfProps) {
             label="Book Title"
             fullWidth
             value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+            onChange={(e) => {
+              setNewTitle(e.target.value);
+              // Auto-generate folder name from title
+              let slug = e.target.value.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-').replace(/^-|-$/g, '') || 'untitled';
+              slug = slug.replace(INVALID_FOLDER_CHARS, '');
+              setNewFolderName(slug);
+              setNewFolderError(validateFolderName(slug));
+            }}
           />
+          <TextField
+            margin="dense"
+            label="Folder Name"
+            fullWidth
+            value={newFolderName}
+            error={!!newFolderError || newPathExists}
+            helperText={newPathExists ? 'This path already exists' : (newFolderError || 'Folder name on disk')}
+            onChange={(e) => {
+              const val = e.target.value;
+              setNewFolderName(val);
+              setNewFolderError(validateFolderName(val));
+              setNewPathExists(false);
+            }}
+            sx={{ mt: 1 }}
+          />
+          <TextField
+            margin="dense"
+            label="Location"
+            fullWidth
+            size="small"
+            value={newParentDir}
+            onChange={(e) => setNewParentDir(e.target.value)}
+            sx={{ mt: 1 }}
+            InputProps={{
+              endAdornment: (
+                <Button size="small" sx={{ minWidth: 'auto', textTransform: 'none' }}
+                  onClick={async () => {
+                    const sel = await open({ directory: true, multiple: false, title: 'Select location' });
+                    if (sel) setNewParentDir(sel);
+                  }}>
+                  Browse
+                </Button>
+              ),
+            }}
+          />
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+            Will be created at: {newParentDir}/{newFolderName}
+          </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setNewDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleCreate} variant="contained" disabled={!newTitle.trim()}>
+          <Button onClick={handleCreate} variant="contained" disabled={!newTitle.trim() || !newFolderName.trim() || !!newFolderError || newPathExists}>
             Create
           </Button>
         </DialogActions>

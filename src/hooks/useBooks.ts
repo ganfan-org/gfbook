@@ -23,8 +23,8 @@ export function useBooks() {
     refresh();
   }, [refresh]);
 
-  const createBook = useCallback(async (title: string): Promise<BookInfo> => {
-    const book = await apiNewBook(title);
+  const createBook = useCallback(async (title: string, bookDir?: string): Promise<BookInfo> => {
+    const book = await apiNewBook(title, bookDir);
     await refresh();
     return book;
   }, [refresh]);
