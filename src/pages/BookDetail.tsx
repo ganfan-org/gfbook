@@ -15,15 +15,13 @@ import {
   TextField,
   Tooltip,
 } from '@mui/material';
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import ChapterEditor from '../components/ChapterEditor';
 import ChapterTree from '../components/ChapterTree';
 import { useBook } from '../hooks/useBook';
 import { revealInFinder } from '../utils/commands';
 import type { Chapter } from '../types';
-
-const DRAWER_WIDTH = 280;
 
 interface BookDetailProps {
   bookPath: string;
@@ -67,6 +65,31 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
   const [syncing, setSyncing] = useState(false);
   const [gitName, setGitName] = useState('');
   const [gitEmail, setGitEmail] = useState('');
+  const [drawerWidth, setDrawerWidth] = useState(280);
+  const resizingRef = useRef(false);
+
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    resizingRef.current = true;
+    const startX = e.clientX;
+    const startWidth = drawerWidth;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!resizingRef.current) return;
+      const newWidth = Math.max(180, Math.min(500, startWidth + ev.clientX - startX));
+      setDrawerWidth(newWidth);
+    };
+
+    const onMouseUp = () => {
+      resizingRef.current = false;
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  }, [drawerWidth]);
+
   const [infoOpen, setInfoOpen] = useState(false);
   const [infoRemoteUrl, setInfoRemoteUrl] = useState('');
   const [infoAhead, setInfoAhead] = useState(0);
@@ -187,79 +210,84 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
 
   return (
     <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      <Drawer
-        variant="permanent"
-        sx={{
-          width: DRAWER_WIDTH,
-          flexShrink: 0,
-          '& .MuiDrawer-paper': {
-            width: DRAWER_WIDTH,
-            boxSizing: 'border-box',
-            bgcolor: 'grey.50',
-            borderRight: 1,
-            borderColor: 'divider',
-          },
-        }}
-      >
-        <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-          <IconButton onClick={onBack} size="small">
-            <ArrowBackIcon />
-          </IconButton>
-          <Typography variant="h6" fontWeight={600} noWrap sx={{ flex: 1 }}>
-            {meta?.title || 'Loading...'}
-          </Typography>
-          <Tooltip title="Book info & settings">
-            <IconButton size="small" onClick={async () => {
-              const url = await getRemoteUrl();
-              setInfoRemoteUrl(url || '(not set)');
-              const [ahead, behind] = await getAheadBehind();
-              setInfoAhead(ahead);
-              setInfoBehind(behind);
-              setInfoOpen(true);
-            }}>
-              <InfoIcon fontSize="small" />
+      <Box sx={{ width: drawerWidth, minWidth: 180, maxWidth: 500, flexShrink: 0, overflow: 'hidden', display: 'flex' }}>
+        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', bgcolor: 'grey.50', borderRight: 1, borderColor: 'divider', minWidth: 0 }}>
+          <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+            <IconButton onClick={onBack} size="small">
+              <ArrowBackIcon />
             </IconButton>
-          </Tooltip>
+            <Typography variant="h6" fontWeight={600} noWrap sx={{ flex: 1 }}>
+              {meta?.title || 'Loading...'}
+            </Typography>
+          </Box>
+          <Divider />
+          <Box sx={{ flex: 1, overflow: 'auto', p: 1 }}>
+            {meta && (
+              <ChapterTree
+                chapters={meta.chapters}
+                selectedId={selectedChapterId}
+                onSelect={selectChapter}
+                onAddChild={handleAddChapter}
+                onRename={handleRenameChapter}
+                onDelete={handleDeleteChapter}
+                onMoveUp={moveUp}
+                onMoveDown={moveDown}
+                onMoveChapter={handleMoveChapter}
+              />
+            )}
+          </Box>
+          <Box sx={{ p: 1, borderTop: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <Box
+              onClick={async () => {
+                setCommitMessage('');
+                setSyncOutput('');
+                const url = await getRemoteUrl();
+                setRemoteUrlState(url || '');
+                setRemoteUrlDraft(url || '');
+                const [name, email] = await getUserConfig();
+                setGitName(name);
+                setGitEmail(email);
+                setCommitDialogOpen(true);
+              }}
+              sx={{ flex: 1, display: 'flex', alignItems: 'center', gap: 0.5, cursor: 'pointer', py: 0.5, px: 0.5, borderRadius: 1, '&:hover': { bgcolor: 'action.hover' } }}
+            >
+              <Box sx={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, bgcolor: gitStatusText ? 'warning.main' : 'success.main' }} />
+              <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
+                {gitStatusText ? 'dirty' : 'clean'}
+              </Typography>
+            </Box>
+            <Tooltip title="Book info">
+              <IconButton size="small" sx={{ width: 26, height: 26 }} onClick={async () => {
+                const url = await getRemoteUrl();
+                setInfoRemoteUrl(url || '(not set)');
+                const [ahead, behind] = await getAheadBehind();
+                setInfoAhead(ahead);
+                setInfoBehind(behind);
+                setInfoOpen(true);
+              }}>
+                <InfoIcon sx={{ fontSize: 16 }} />
+              </IconButton>
+            </Tooltip>
+          </Box>
         </Box>
-        <Divider />
-        <Box sx={{ flex: 1, overflow: 'auto', p: 1 }}>
-          {meta && (
-            <ChapterTree
-              chapters={meta.chapters}
-              selectedId={selectedChapterId}
-              onSelect={selectChapter}
-              onAddChild={handleAddChapter}
-              onRename={handleRenameChapter}
-              onDelete={handleDeleteChapter}
-              onMoveUp={moveUp}
-              onMoveDown={moveDown}
-              onMoveChapter={handleMoveChapter}
-            />
-          )}
-        </Box>
-        <Box sx={{ p: 1.5, borderTop: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer' }}
-          onClick={async () => {
-            setCommitMessage('');
-            setSyncOutput('');
-            const url = await getRemoteUrl();
-            setRemoteUrlState(url || '');
-            setRemoteUrlDraft(url || '');
-            const [name, email] = await getUserConfig();
-            setGitName(name);
-            setGitEmail(email);
-            setCommitDialogOpen(true);
-          }}>
-          <Box
-            sx={{
-              width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-              bgcolor: gitStatusText ? 'warning.main' : 'success.main',
-            }}
-          />
-          <Typography variant="caption" color="text.secondary" sx={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {gitStatusText || 'clean'}
-          </Typography>
-        </Box>
-      </Drawer>
+        {/* Drag handle */}
+        <Box
+          onMouseDown={handleResizeStart}
+          sx={{
+            width: 6,
+            cursor: 'col-resize',
+            flexShrink: 0,
+            bgcolor: 'transparent',
+            backgroundClip: 'content-box',
+            px: 1,
+            mx: '-1px',
+            zIndex: 10,
+            '&:hover': { bgcolor: 'primary.main', opacity: 0.2 },
+            '&:active': { bgcolor: 'primary.main', opacity: 0.35 },
+            transition: 'background-color 0.1s',
+          }}
+        />
+      </Box>
 
       <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {selectedChapter ? (

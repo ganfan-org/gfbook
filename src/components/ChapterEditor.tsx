@@ -204,6 +204,42 @@ export default function ChapterEditor({ content, bookPath, onContentChange }: Ch
     return () => { editor.off('selectionUpdate', handler); };
   }, [editor]);
 
+  // Download external images pasted from clipboard
+  useEffect(() => {
+    if (!editor) return;
+    const processed = new Set<string>();
+    const handler = async () => {
+      const todo: { pos: number; url: string }[] = [];
+      editor.state.doc.descendants((node, pos) => {
+        const src = node.attrs.src as string | undefined;
+        if (src && (src.startsWith('http://') || src.startsWith('https://')) && !processed.has(src)) {
+          todo.push({ pos, url: src });
+          processed.add(src);
+        }
+      });
+      if (todo.length === 0) return;
+      for (const { url } of todo) {
+        try {
+          const relPath = await invoke('download_image_url', { bookPath, url });
+          const dataUrl = await invoke('read_image_as_data_url', { bookPath, relPath });
+          let found = false;
+          editor.state.doc.descendants((node, pos) => {
+            if (!found && node.attrs.src === url) {
+              found = true;
+              const tr = editor.state.tr;
+              tr.setNodeMarkup(pos, undefined, { src: relPath, dataSrc: dataUrl });
+              editor.view.dispatch(tr);
+            }
+          });
+        } catch (e) {
+          console.error('Failed to download image:', url, e);
+        }
+      }
+    };
+    editor.on('update', handler);
+    return () => { editor.off('update', handler); };
+  }, [editor]);
+
   // Update TOC when editor content changes
   useEffect(() => {
     if (!editor || !tocOpen) return;

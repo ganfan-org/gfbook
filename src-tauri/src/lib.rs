@@ -42,6 +42,7 @@ pub fn run() {
             read_image_as_data_url,
             save_image_to_book,
             save_image_data,
+            download_image_url,
             reveal_in_finder,
             path_exists,
         ])

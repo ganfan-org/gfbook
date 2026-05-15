@@ -727,6 +727,50 @@ pub fn reveal_in_finder(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn download_image_url(book_path: String, url: String) -> Result<String, String> {
+    let assets_dir = PathBuf::from(&book_path).join("assets");
+    fs::create_dir_all(&assets_dir)
+        .map_err(|e| format!("Failed to create assets dir: {}", e))?;
+
+    let response = reqwest::blocking::get(&url)
+        .map_err(|e| format!("Failed to download image: {}", e))?;
+
+    // Determine extension from content-type or URL (before consuming response)
+    let ext = {
+        let ct_hint = response.headers().get("content-type").and_then(|v| v.to_str().ok()).map(|s| s.to_string());
+        if let Some(ct) = ct_hint {
+            match ct.as_str() {
+                s if s.contains("png") => "png".to_string(),
+                s if s.contains("jpeg") || s.contains("jpg") => "jpg".to_string(),
+                s if s.contains("gif") => "gif".to_string(),
+                s if s.contains("webp") => "webp".to_string(),
+                s if s.contains("svg") => "svg".to_string(),
+                _ => "png".to_string(),
+            }
+        } else if let Ok(parsed) = url::Url::parse(&url) {
+            let path = parsed.path().to_string();
+            PathBuf::from(&path)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("png")
+                .to_lowercase()
+        } else {
+            "png".to_string()
+        }
+    };
+
+    let bytes = response
+        .bytes()
+        .map_err(|e| format!("Failed to read image data: {}", e))?;
+
+    let filename = format!("{}.{}", Uuid::new_v4(), ext);
+    let dest = assets_dir.join(&filename);
+    fs::write(&dest, &bytes).map_err(|e| format!("Failed to write image: {}", e))?;
+
+    Ok(format!("assets/{}", filename))
+}
+
+#[tauri::command]
 pub fn save_image_data(book_path: String, data_base64: String, ext: String) -> Result<String, String> {
     let assets_dir = PathBuf::from(&book_path).join("assets");
     fs::create_dir_all(&assets_dir)

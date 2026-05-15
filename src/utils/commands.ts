@@ -118,6 +118,10 @@ export function revealInFinder(path: string): Promise<void> {
   return invoke('reveal_in_finder', { path });
 }
 
+export function downloadImageUrl(bookPath: string, url: string): Promise<string> {
+  return invoke('download_image_url', { bookPath, url });
+}
+
 export function pathExists(path: string): Promise<boolean> {
   return invoke('path_exists', { path });
 }
