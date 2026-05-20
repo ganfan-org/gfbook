@@ -14,7 +14,7 @@ import LooksTwoIcon from '@mui/icons-material/LooksTwo';
 import Looks3Icon from '@mui/icons-material/Looks3';
 import { Box, IconButton, Tooltip, Typography } from '@mui/material';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Markdown } from 'tiptap-markdown';
+import { Markdown } from '@tiptap/markdown';
 import MarkdownIt from 'markdown-it';
 import { open } from '@tauri-apps/plugin-dialog';
 import './ChapterEditor.css';
@@ -62,14 +62,7 @@ function useTipTapEditor(content: string, onContentChange: (markdown: string) =>
         heading: { levels: [1, 2, 3, 4, 5, 6] },
       }),
       ImageWithAsset.configure({ inline: false }),
-      Markdown.configure({
-        html: true,
-        tightLists: true,
-        tightListClass: 'tight',
-        bulletListMarker: '-',
-        linkify: true,
-        breaks: true,
-      }),
+      Markdown,
     ],
     content: content ? md.render(content) : '<p></p>',
     editorProps: {
@@ -125,7 +118,7 @@ function useTipTapEditor(content: string, onContentChange: (markdown: string) =>
       },
     },
     onUpdate: ({ editor: ed }) => {
-      const markdown = (ed.storage as any).markdown.getMarkdown();
+      const markdown = ed.storage.markdown.manager.serialize(ed.getJSON());
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         onChangeRef.current(markdown);
@@ -356,7 +349,7 @@ export default function ChapterEditor({ content, bookPath, onContentChange }: Ch
               borderColor: 'divider',
               overflow: 'auto',
               p: 1.5,
-              bgcolor: 'grey.50',
+              bgcolor: (t: any) => t.palette.mode === 'dark' ? 'grey.900' : 'grey.50',
             }}
           >
             <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: 1 }}>

@@ -180,8 +180,33 @@ pub fn git_remote_set_url(book_path: &str, url: &str) -> Result<(), String> {
 
 fn default_callbacks() -> RemoteCallbacks<'static> {
     let mut callbacks = RemoteCallbacks::new();
-    callbacks.credentials(|_url, username_from_url, _allowed_types| {
-        Cred::ssh_key_from_agent(username_from_url.unwrap_or("git"))
+    let home = std::env::var("HOME").unwrap_or_default();
+
+    callbacks.credentials(move |_url, username_from_url, allowed_types| {
+        let user = username_from_url.unwrap_or("git");
+        if allowed_types.contains(git2::CredentialType::SSH_KEY) {
+            // Try SSH agent first
+            if let Ok(cred) = Cred::ssh_key_from_agent(user) {
+                return Ok(cred);
+            }
+            // Try default SSH key files
+            let key_paths = [
+                std::path::PathBuf::from(&home).join(".ssh/id_ed25519"),
+                std::path::PathBuf::from(&home).join(".ssh/id_rsa"),
+                std::path::PathBuf::from(&home).join(".ssh/id_ecdsa"),
+            ];
+            for path in &key_paths {
+                if path.exists() {
+                    if let Ok(cred) = Cred::ssh_key(user, None, path, None) {
+                        return Ok(cred);
+                    }
+                }
+            }
+        }
+        if allowed_types.contains(git2::CredentialType::USER_PASS_PLAINTEXT) {
+            return Err(git2::Error::from_str("Need username/password. Use HTTPS URL with token."));
+        }
+        Err(git2::Error::from_str("No auth method available for this URL"))
     });
     callbacks
 }
@@ -330,6 +355,25 @@ pub fn git_set_user_config(book_path: &str, name: &str, email: &str) -> Result<(
     config
         .set_str("user.email", email)
         .map_err(|e| format!("Failed to set user.email: {}", e))?;
+    Ok(())
+}
+
+pub fn git_get_proxy(book_path: &str) -> Result<String, String> {
+    let repo = open_repo(book_path)?;
+    let config = repo.config().map_err(|e| format!("Config error: {}", e))?;
+    Ok(config.get_string("http.proxy").unwrap_or_default())
+}
+
+pub fn git_set_proxy(book_path: &str, proxy: &str) -> Result<(), String> {
+    let repo = open_repo(book_path)?;
+    let mut config = repo.config().map_err(|e| format!("Config error: {}", e))?;
+    if proxy.is_empty() {
+        let _ = config.remove("http.proxy");
+    } else {
+        config
+            .set_str("http.proxy", proxy)
+            .map_err(|e| format!("Failed to set http.proxy: {}", e))?;
+    }
     Ok(())
 }
 

@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 
 import type { BookInfo } from '../types';
-import { listBooks, newBook as apiNewBook, deleteBook as apiDeleteBook, renameBook as apiRenameBook, importBook as apiImportBook, getBooksDir as apiGetBooksDir, setBooksDir as apiSetBooksDir } from '../utils/commands';
+import { listBooks, newBook as apiNewBook, deleteBook as apiDeleteBook, renameBook as apiRenameBook, importBook as apiImportBook, getBooksDir as apiGetBooksDir, setBooksDir as apiSetBooksDir, getGlobalGitUser, setGlobalGitUser, getProxySetting, setProxySetting } from '../utils/commands';
 
 export function useBooks() {
   const [books, setBooks] = useState<BookInfo[]>([]);
@@ -54,5 +54,16 @@ export function useBooks() {
     await apiSetBooksDir(dir);
   }, []);
 
-  return { books, loading, refresh, createBook, removeBook, changeBookName, importExternalBook };
+  const getGlobalSettings = useCallback(async () => {
+    const [name, email] = await getGlobalGitUser();
+    const proxy = await getProxySetting();
+    return { name, email, proxy };
+  }, []);
+
+  const setGlobalSettings = useCallback(async (name: string, email: string, proxy: string) => {
+    await setGlobalGitUser(name, email);
+    await setProxySetting(proxy);
+  }, []);
+
+  return { books, loading, refresh, createBook, removeBook, changeBookName, importExternalBook, getBooksDirectory, getGlobalSettings, setGlobalSettings };
 }

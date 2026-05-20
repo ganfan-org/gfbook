@@ -2,11 +2,17 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import DriveFileRenameOutlineIcon from '@mui/icons-material/DriveFileRenameOutline';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import DarkModeIcon from '@mui/icons-material/DarkMode';
+import LightModeIcon from '@mui/icons-material/LightMode';
+import SettingsIcon from '@mui/icons-material/Settings';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import {
   Box,
   Typography,
   Button,
+  Card,
+  CardContent,
+  CardActions,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -17,10 +23,9 @@ import {
   Menu,
   MenuItem,
   ListItemIcon,
-  Card,
   CardMedia,
-  CardContent,
   CardActionArea,
+  Divider,
 } from '@mui/material';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useState, useEffect } from 'react';
@@ -30,6 +35,8 @@ import type { BookInfo } from '../types';
 
 interface BookShelfProps {
   onOpenBook: (bookPath: string) => void;
+  onToggleTheme: () => void;
+  mode: 'light' | 'dark';
 }
 
 const COVER_COLORS = [
@@ -160,8 +167,8 @@ function BookCover({ title, onClick, onDelete, onRename }: { title: string; onCl
   );
 }
 
-export default function BookShelf({ onOpenBook }: BookShelfProps) {
-  const { books, loading, createBook, removeBook, changeBookName, importExternalBook } = useBooks();
+export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelfProps) {
+  const { books, loading, createBook, removeBook, changeBookName, importExternalBook, getGlobalSettings, setGlobalSettings } = useBooks();
   const [newDialogOpen, setNewDialogOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newFolderName, setNewFolderName] = useState('');
@@ -184,6 +191,10 @@ export default function BookShelf({ onOpenBook }: BookShelfProps) {
   const [deleteConfirm, setDeleteConfirm] = useState<BookInfo | null>(null);
   const [renameTarget, setRenameTarget] = useState<BookInfo | null>(null);
   const [renameTitle, setRenameTitle] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [globalGitName, setGlobalGitName] = useState('');
+  const [globalGitEmail, setGlobalGitEmail] = useState('');
+  const [globalProxy, setGlobalProxy] = useState('');
 
   const handleCreate = async () => {
     if (!newTitle.trim()) return;
@@ -280,6 +291,18 @@ export default function BookShelf({ onOpenBook }: BookShelfProps) {
           <Button variant="contained" startIcon={<AddIcon />} onClick={() => setNewDialogOpen(true)}>
             New Book
           </Button>
+          <IconButton onClick={onToggleTheme}>
+            {mode === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
+          </IconButton>
+          <IconButton onClick={async () => {
+            const s = await getGlobalSettings();
+            setGlobalGitName(s.name);
+            setGlobalGitEmail(s.email);
+            setGlobalProxy(s.proxy);
+            setSettingsOpen(true);
+          }}>
+            <SettingsIcon />
+          </IconButton>
         </Box>
       </Box>
 
@@ -382,6 +405,33 @@ export default function BookShelf({ onOpenBook }: BookShelfProps) {
           <Button onClick={handleCreate} variant="contained" disabled={!newTitle.trim() || !newFolderName.trim() || !!newFolderError || newPathExists}>
             Create
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={settingsOpen} onClose={() => setSettingsOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Settings</DialogTitle>
+        <DialogContent>
+          <Typography variant="subtitle2" gutterBottom>Git Author</Typography>
+          <Box display="flex" gap={1} mb={2}>
+            <TextField size="small" label="Name" placeholder="Your Name"
+              value={globalGitName} onChange={(e) => setGlobalGitName(e.target.value)} sx={{ flex: 1 }} />
+            <TextField size="small" label="Email" placeholder="you@example.com"
+              value={globalGitEmail} onChange={(e) => setGlobalGitEmail(e.target.value)} sx={{ flex: 1 }} />
+          </Box>
+
+          <Divider sx={{ my: 2 }} />
+
+          <Typography variant="subtitle2" gutterBottom>Proxy</Typography>
+          <Box display="flex" gap={1} alignItems="center" mb={1}>
+            <TextField size="small" placeholder="http://proxy:8080" value={globalProxy}
+              onChange={(e) => setGlobalProxy(e.target.value)} sx={{ flex: 1 }} />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSettingsOpen(false)}>Cancel</Button>
+          <Button onClick={async () => {
+            try { await setGlobalSettings(globalGitName, globalGitEmail, globalProxy); setSettingsOpen(false); } catch (e) { console.error(e); }
+          }} variant="contained">Save</Button>
         </DialogActions>
       </Dialog>
 

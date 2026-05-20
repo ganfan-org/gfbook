@@ -1,5 +1,5 @@
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import InfoIcon from '@mui/icons-material/Info';
+import SettingsIcon from '@mui/icons-material/Settings';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import {
   Box,
@@ -15,6 +15,7 @@ import {
   TextField,
   Tooltip,
 } from '@mui/material';
+import { listen } from '@tauri-apps/api/event';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import ChapterEditor from '../components/ChapterEditor';
@@ -45,13 +46,13 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
     commit,
     autoCommit,
     getRemoteUrl,
-    setRemoteUrl: setRemoteUrlApi,
+    setRemoteUrl:     setRemoteUrlApi,
     fetchRemote,
     pullRemote,
     pushRemote,
     getAheadBehind,
     getUserConfig,
-    changeUserConfig,
+    refreshGitStatus,
   } = useBook(bookPath);
 
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -60,9 +61,9 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [commitMessage, setCommitMessage] = useState('');
   const [remoteUrlState, setRemoteUrlState] = useState('');
+  const [syncingType, setSyncingType] = useState<string | null>(null);
   const [remoteUrlDraft, setRemoteUrlDraft] = useState('');
   const [syncOutput, setSyncOutput] = useState('');
-  const [syncing, setSyncing] = useState(false);
   const [gitName, setGitName] = useState('');
   const [gitEmail, setGitEmail] = useState('');
   const [drawerWidth, setDrawerWidth] = useState(280);
@@ -90,12 +91,7 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
     window.addEventListener('mouseup', onMouseUp);
   }, [drawerWidth]);
 
-  const [infoOpen, setInfoOpen] = useState(false);
-  const [infoRemoteUrl, setInfoRemoteUrl] = useState('');
-  const [infoAhead, setInfoAhead] = useState(0);
-  const [infoBehind, setInfoBehind] = useState(0);
-  const [infoSyncing, setInfoSyncing] = useState(false);
-  const [infoOutput, setInfoOutput] = useState('');
+
 
   // Auto-commit every 10 minutes
   useEffect(() => {
@@ -118,6 +114,18 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
   useEffect(() => {
     return () => { autoCommit('auto-save'); };
   }, [autoCommit]);
+
+  // Listen for async git operation results
+  useEffect(() => {
+    const unlisten = listen<{ type: string; ok: boolean; message: string }>('git:done', (event) => {
+      setSyncingType(null);
+      setSyncOutput(event.payload.message);
+      if (event.payload.ok) {
+        refreshGitStatus();
+      }
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, [refreshGitStatus]);
 
   const selectedChapter = useMemo(() => {
     if (!meta || !selectedChapterId) return null;
@@ -211,7 +219,7 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
   return (
     <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
       <Box sx={{ width: drawerWidth, minWidth: 180, maxWidth: 500, flexShrink: 0, overflow: 'hidden', display: 'flex' }}>
-        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', bgcolor: 'grey.50', borderRight: 1, borderColor: 'divider', minWidth: 0 }}>
+        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', bgcolor: (t) => t.palette.mode === 'dark' ? 'grey.900' : 'grey.50', borderRight: 1, borderColor: 'divider', minWidth: 0 }}>
           <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
             <IconButton onClick={onBack} size="small">
               <ArrowBackIcon />
@@ -236,38 +244,25 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
               />
             )}
           </Box>
-          <Box sx={{ p: 1, borderTop: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <Box
-              onClick={async () => {
-                setCommitMessage('');
-                setSyncOutput('');
-                const url = await getRemoteUrl();
-                setRemoteUrlState(url || '');
-                setRemoteUrlDraft(url || '');
-                const [name, email] = await getUserConfig();
-                setGitName(name);
-                setGitEmail(email);
-                setCommitDialogOpen(true);
-              }}
-              sx={{ flex: 1, display: 'flex', alignItems: 'center', gap: 0.5, cursor: 'pointer', py: 0.5, px: 0.5, borderRadius: 1, '&:hover': { bgcolor: 'action.hover' } }}
-            >
-              <Box sx={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, bgcolor: gitStatusText ? 'warning.main' : 'success.main' }} />
-              <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
-                {gitStatusText ? 'dirty' : 'clean'}
-              </Typography>
-            </Box>
-            <Tooltip title="Book info">
-              <IconButton size="small" sx={{ width: 26, height: 26 }} onClick={async () => {
-                const url = await getRemoteUrl();
-                setInfoRemoteUrl(url || '(not set)');
-                const [ahead, behind] = await getAheadBehind();
-                setInfoAhead(ahead);
-                setInfoBehind(behind);
-                setInfoOpen(true);
-              }}>
-                <InfoIcon sx={{ fontSize: 16 }} />
-              </IconButton>
-            </Tooltip>
+          <Box
+            onClick={async () => {
+              setCommitMessage('');
+              setSyncOutput('');
+              const url = await getRemoteUrl();
+              setRemoteUrlState(url || '');
+              setRemoteUrlDraft(url || '');
+              const [name, email] = await getUserConfig();
+              setGitName(name);
+              setGitEmail(email);
+              setCommitDialogOpen(true);
+            }}
+            sx={{ p: 1, borderTop: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 0.5, cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
+          >
+            <Box sx={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, bgcolor: gitStatusText ? 'warning.main' : 'success.main' }} />
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', flex: 1 }}>
+              {gitStatusText ? 'dirty' : 'clean'}
+            </Typography>
+            <SettingsIcon sx={{ fontSize: 16, color: 'text.secondary', opacity: 0.6 }} />
           </Box>
         </Box>
         {/* Drag handle */}
@@ -312,8 +307,11 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
         )}
       </Box>
 
-      <Dialog open={infoOpen} onClose={() => setInfoOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Book Info</DialogTitle>
+      <Dialog open={commitDialogOpen} onClose={() => {
+        setCommitDialogOpen(false);
+        setSyncOutput('');
+      }} maxWidth="sm" fullWidth>
+        <DialogTitle>Settings</DialogTitle>
         <DialogContent>
           <Typography variant="subtitle2" gutterBottom>Storage</Typography>
           <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.8rem', wordBreak: 'break-all', mb: 1 }}>
@@ -325,55 +323,7 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
 
           <Divider sx={{ my: 2 }} />
 
-          <Typography variant="subtitle2" gutterBottom>Git Remote</Typography>
-          <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.8rem', mb: 1 }}>
-            {infoRemoteUrl}
-          </Typography>
-          <Box display="flex" gap={1} mb={1}>
-            <Typography variant="caption" color={infoAhead > 0 ? 'warning.main' : 'text.secondary'}>
-              {infoAhead} ahead
-            </Typography>
-            <Typography variant="caption" color={infoBehind > 0 ? 'warning.main' : 'text.secondary'}>
-              {infoBehind} behind
-            </Typography>
-          </Box>
-          <Box display="flex" gap={1}>
-            <Button size="small" variant="outlined" disabled={infoSyncing} onClick={async () => {
-              setInfoSyncing(true); setInfoOutput('');
-              try { const r = await fetchRemote(); setInfoOutput(r); } catch (e: any) { setInfoOutput(String(e)); }
-              const [a, b] = await getAheadBehind(); setInfoAhead(a); setInfoBehind(b);
-              setInfoSyncing(false);
-            }}>Fetch</Button>
-            <Button size="small" variant="outlined" disabled={infoSyncing} onClick={async () => {
-              setInfoSyncing(true); setInfoOutput('');
-              try { const r = await pullRemote(); setInfoOutput(r); } catch (e: any) { setInfoOutput(String(e)); }
-              const [a, b] = await getAheadBehind(); setInfoAhead(a); setInfoBehind(b);
-              setInfoSyncing(false);
-            }}>Pull</Button>
-            <Button size="small" variant="outlined" disabled={infoSyncing} onClick={async () => {
-              setInfoSyncing(true); setInfoOutput('');
-              try { const r = await pushRemote(); setInfoOutput(r); } catch (e: any) { setInfoOutput(String(e)); }
-              setInfoSyncing(false);
-            }}>Push</Button>
-          </Box>
-          {infoOutput && (
-            <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.75rem', whiteSpace: 'pre-wrap', bgcolor: 'grey.100', p: 1, borderRadius: 1, mt: 1 }}>
-              {infoOutput}
-            </Typography>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setInfoOpen(false)}>Close</Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog open={commitDialogOpen} onClose={() => {
-        setCommitDialogOpen(false);
-        setSyncOutput('');
-      }} maxWidth="sm" fullWidth>
-        <DialogTitle>Git</DialogTitle>
-        <DialogContent>
-          <Typography variant="subtitle2" gutterBottom>Changes</Typography>
+          <Typography variant="subtitle2" gutterBottom>Git Changes</Typography>
           <Typography variant="body2" color="text.secondary" mb={2} sx={{ fontFamily: 'monospace', fontSize: '0.8rem', whiteSpace: 'pre-wrap' }}>
             {gitStatusText || 'No changes'}
           </Typography>
@@ -402,24 +352,6 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
               </Box>
             </>
           )}
-
-          <Divider sx={{ my: 2 }} />
-
-          <Typography variant="subtitle2" gutterBottom>Author</Typography>
-          <Box display="flex" gap={1} mb={2}>
-            <TextField size="small" label="Name" placeholder="Your Name"
-              value={gitName} onChange={(e) => setGitName(e.target.value)}
-              sx={{ flex: 1 }} />
-            <TextField size="small" label="Email" placeholder="you@example.com"
-              value={gitEmail} onChange={(e) => setGitEmail(e.target.value)}
-              sx={{ flex: 1 }} />
-            <Button size="small" variant="outlined" sx={{ mt: 0.5, alignSelf: 'flex-end' }}
-              onClick={async () => {
-                try { await changeUserConfig(gitName, gitEmail); } catch (e) { console.error(e); }
-              }}>
-              Save
-            </Button>
-          </Box>
 
           <Divider sx={{ my: 2 }} />
 
@@ -454,28 +386,34 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
           </Box>
 
           <Box display="flex" gap={1} mb={1}>
-            <Button size="small" variant="outlined" disabled={syncing} onClick={async () => {
-              setSyncing(true); setSyncOutput('');
-              try { setSyncOutput(await fetchRemote()); } catch (e: any) { setSyncOutput(String(e)); }
-              setSyncing(false);
-            }}>Fetch</Button>
-            <Button size="small" variant="outlined" disabled={syncing} onClick={async () => {
-              setSyncing(true); setSyncOutput('');
-              try { setSyncOutput(await pullRemote()); } catch (e: any) { setSyncOutput(String(e)); }
-              setSyncing(false);
-            }}>Pull</Button>
-            <Button size="small" variant="outlined" disabled={syncing} onClick={async () => {
-              setSyncing(true); setSyncOutput('');
-              try { setSyncOutput(await pushRemote()); } catch (e: any) { setSyncOutput(String(e)); }
-              setSyncing(false);
-            }}>Push</Button>
+            <Button size="small" variant="outlined" disabled={!!syncingType} onClick={async () => {
+              setSyncingType('fetch'); setSyncOutput('');
+              await fetchRemote();
+            }}>{syncingType === 'fetch' ? 'Fetching...' : 'Fetch'}</Button>
+            <Button size="small" variant="outlined" disabled={!!syncingType} onClick={async () => {
+              setSyncingType('pull'); setSyncOutput('');
+              await pullRemote();
+            }}>{syncingType === 'pull' ? 'Pulling...' : 'Pull'}</Button>
+            <Button size="small" variant="outlined" disabled={!!syncingType} onClick={async () => {
+              setSyncingType('push'); setSyncOutput('');
+              await pushRemote();
+            }}>{syncingType === 'push' ? 'Pushing...' : 'Push'}</Button>
           </Box>
 
-          {syncOutput && (
-            <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.75rem', whiteSpace: 'pre-wrap', bgcolor: 'grey.100', p: 1, borderRadius: 1, mt: 1 }}>
-              {syncOutput}
-            </Typography>
-          )}
+          <Box sx={{ bgcolor: 'grey.900', color: '#a8d85a', p: 1.5, borderRadius: 1, mt: 2, minHeight: 60, maxHeight: 150, overflow: 'auto', fontFamily: 'monospace', fontSize: '0.75rem', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+            {syncingType ? (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Box sx={{ width: 12, height: 12, border: '2px solid #a8d85a', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }}>
+                  <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                </Box>
+                <span>{syncingType === 'fetch' ? 'Fetching...' : syncingType === 'pull' ? 'Pulling...' : 'Pushing...'}</span>
+              </Box>
+            ) : syncOutput ? (
+              syncOutput
+            ) : (
+              <span style={{ color: '#666' }}>Ready</span>
+            )}
+          </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => { setCommitDialogOpen(false); setSyncOutput(''); }}>Close</Button>

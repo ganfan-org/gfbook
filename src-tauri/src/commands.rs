@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use uuid::Uuid;
 
 use crate::git;
@@ -596,6 +596,7 @@ pub fn move_chapter_down(book_path: String, chapter_id: String) -> Result<(), St
     Ok(())
 }
 
+
 #[tauri::command]
 pub fn git_status(book_path: String) -> Result<String, String> {
     git::git_status(&book_path)
@@ -621,19 +622,52 @@ pub fn git_remote_set_url(book_path: String, url: String) -> Result<(), String> 
     git::git_remote_set_url(&book_path, &url)
 }
 
-#[tauri::command]
-pub fn git_fetch(book_path: String) -> Result<String, String> {
-    git::git_fetch(&book_path)
+fn run_git_and_emit<F>(app_handle: tauri::AppHandle, op_type: &'static str, f: F)
+where
+    F: FnOnce() -> Result<String, String> + Send + 'static,
+{
+    std::thread::spawn(move || {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // Timeout after 30 seconds using a separate thread
+            let (tx, rx) = std::sync::mpsc::channel();
+            let handle = std::thread::spawn(move || {
+                let _ = tx.send(f());
+            });
+            match rx.recv_timeout(std::time::Duration::from_secs(30)) {
+                Ok(Ok(msg)) => {
+                    let _ = app_handle.emit("git:done", serde_json::json!({"type": op_type, "ok": true, "message": msg}));
+                }
+                Ok(Err(e)) => {
+                    let _ = app_handle.emit("git:done", serde_json::json!({"type": op_type, "ok": false, "message": e}));
+                }
+                Err(_) => {
+                    let _ = app_handle.emit("git:done", serde_json::json!({"type": op_type, "ok": false, "message": "Operation timed out (30s)"}));
+                }
+            }
+            let _ = handle.join();
+        }));
+        if result.is_err() {
+            let _ = app_handle.emit("git:done", serde_json::json!({"type": op_type, "ok": false, "message": "Internal error: operation crashed"}));
+        }
+    });
 }
 
 #[tauri::command]
-pub fn git_pull(book_path: String) -> Result<String, String> {
-    git::git_pull(&book_path)
+pub fn git_fetch(book_path: String, app_handle: tauri::AppHandle) -> Result<String, String> {
+    run_git_and_emit(app_handle, "fetch", move || git::git_fetch(&book_path));
+    Ok("started".to_string())
 }
 
 #[tauri::command]
-pub fn git_push(book_path: String) -> Result<String, String> {
-    git::git_push(&book_path)
+pub fn git_pull(book_path: String, app_handle: tauri::AppHandle) -> Result<String, String> {
+    run_git_and_emit(app_handle, "pull", move || git::git_pull(&book_path));
+    Ok("started".to_string())
+}
+
+#[tauri::command]
+pub fn git_push(book_path: String, app_handle: tauri::AppHandle) -> Result<String, String> {
+    run_git_and_emit(app_handle, "push", move || git::git_push(&book_path));
+    Ok("started".to_string())
 }
 
 #[tauri::command]
@@ -834,16 +868,67 @@ pub fn save_image_to_book(book_path: String, source_path: String) -> Result<Stri
 }
 
 #[tauri::command]
+pub fn git_get_proxy(book_path: String) -> Result<String, String> {
+    git::git_get_proxy(&book_path)
+}
+
+#[tauri::command]
+pub fn git_set_proxy(book_path: String, proxy: String) -> Result<(), String> {
+    git::git_set_proxy(&book_path, &proxy)
+}
+
+#[tauri::command]
 pub fn git_user_config(book_path: String) -> Result<(String, String), String> {
     git::git_user_config(&book_path)
 }
 
 #[tauri::command]
-pub fn git_list_conflicted(book_path: String) -> Result<Vec<String>, String> {
-    git::git_list_conflicted(&book_path)
+pub fn git_set_user_config(book_path: String, name: String, email: String) -> Result<(), String> {
+    git::git_set_user_config(&book_path, &name, &email)
 }
 
 #[tauri::command]
-pub fn git_set_user_config(book_path: String, name: String, email: String) -> Result<(), String> {
-    git::git_set_user_config(&book_path, &name, &email)
+pub fn get_global_git_user() -> Result<(String, String), String> {
+    let config = git2::Config::open_default().map_err(|e| format!("Config error: {}", e))?;
+    let name = config.get_string("user.name").unwrap_or_default();
+    let email = config.get_string("user.email").unwrap_or_default();
+    Ok((name, email))
+}
+
+#[tauri::command]
+pub fn set_global_git_user(name: String, email: String) -> Result<(), String> {
+    let mut config = git2::Config::open_default().map_err(|e| format!("Config error: {}", e))?;
+    config.set_str("user.name", &name).map_err(|e| format!("Failed to set user.name: {}", e))?;
+    config.set_str("user.email", &email).map_err(|e| format!("Failed to set user.email: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_proxy_setting(app_handle: tauri::AppHandle) -> Result<String, String> {
+    let config = load_config(&app_handle).unwrap_or_default();
+    Ok(config.get("proxy").and_then(|v| v.as_str()).unwrap_or("").to_string())
+}
+
+#[tauri::command]
+pub fn set_proxy_setting(app_handle: tauri::AppHandle, proxy: String) -> Result<(), String> {
+    let mut config = load_config(&app_handle).unwrap_or_default();
+    if proxy.is_empty() {
+        config.as_object_mut().map(|m| m.remove("proxy"));
+        // Also remove from git global config
+        if let Ok(mut git_cfg) = git2::Config::open_default() {
+            let _ = git_cfg.remove("http.proxy");
+        }
+    } else {
+        config["proxy"] = serde_json::json!(proxy);
+        // Also set in git global config so git2-rs picks it up
+        if let Ok(mut git_cfg) = git2::Config::open_default() {
+            let _ = git_cfg.set_str("http.proxy", &proxy);
+        }
+    }
+    save_config(&app_handle, &config)
+}
+
+#[tauri::command]
+pub fn git_list_conflicted(book_path: String) -> Result<Vec<String>, String> {
+    git::git_list_conflicted(&book_path)
 }

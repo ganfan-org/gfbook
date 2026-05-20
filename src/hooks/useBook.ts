@@ -22,6 +22,8 @@ import {
   gitAheadBehind,
   gitUserConfig,
   gitSetUserConfig,
+  gitGetProxy,
+  gitSetProxy,
 } from '../utils/commands';
 
 export function useBook(bookPath: string | null) {
@@ -159,23 +161,23 @@ export function useBook(bookPath: string | null) {
 
   const fetchRemote = useCallback(async (): Promise<string> => {
     if (!bookPath) throw new Error('No book selected');
-    const result = await gitFetch(bookPath);
+    await gitFetch(bookPath);
     await refreshGitStatus();
-    return result;
+    return 'started';
   }, [bookPath, refreshGitStatus]);
 
   const pullRemote = useCallback(async (): Promise<string> => {
     if (!bookPath) throw new Error('No book selected');
-    const result = await gitPull(bookPath);
+    await gitPull(bookPath);
     await refreshGitStatus();
-    return result;
+    return 'started';
   }, [bookPath, refreshGitStatus]);
 
   const pushRemote = useCallback(async (): Promise<string> => {
     if (!bookPath) throw new Error('No book selected');
-    const result = await gitPush(bookPath);
+    await gitPush(bookPath);
     await refreshGitStatus();
-    return result;
+    return 'started';
   }, [bookPath, refreshGitStatus]);
 
   const getAheadBehind = useCallback(async (): Promise<[number, number]> => {
@@ -193,11 +195,21 @@ export function useBook(bookPath: string | null) {
     await gitSetUserConfig(bookPath, name, email);
   }, [bookPath]);
 
+  const getProxy = useCallback(async (): Promise<string> => {
+    if (!bookPath) return '';
+    return gitGetProxy(bookPath);
+  }, [bookPath]);
+
+  const setProxy = useCallback(async (proxy: string): Promise<void> => {
+    if (!bookPath) throw new Error('No book selected');
+    await gitSetProxy(bookPath, proxy);
+  }, [bookPath]);
+
   return {
     meta, loading, selectedChapterId, chapterContent, gitStatusText, commits,
     selectChapter, saveChapter, createChapter, removeChapter,
     renameChapterById, moveChapterTo, moveUp, moveDown, commit, autoCommit, refreshMeta, refreshGitStatus,
     getRemoteUrl, setRemoteUrl, fetchRemote, pullRemote, pushRemote, getAheadBehind,
-    getUserConfig, changeUserConfig,
+    getUserConfig, changeUserConfig, getProxy, setProxy,
   };
 }

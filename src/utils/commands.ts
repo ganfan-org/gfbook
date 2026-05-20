@@ -110,6 +110,30 @@ export function gitSetUserConfig(bookPath: string, name: string, email: string):
   return invoke('git_set_user_config', { bookPath, name, email });
 }
 
+export function gitGetProxy(bookPath: string): Promise<string> {
+  return invoke('git_get_proxy', { bookPath });
+}
+
+export function gitSetProxy(bookPath: string, proxy: string): Promise<void> {
+  return invoke('git_set_proxy', { bookPath, proxy });
+}
+
+export function getGlobalGitUser(): Promise<[string, string]> {
+  return invoke('get_global_git_user');
+}
+
+export function setGlobalGitUser(name: string, email: string): Promise<void> {
+  return invoke('set_global_git_user', { name, email });
+}
+
+export function getProxySetting(): Promise<string> {
+  return invoke('get_proxy_setting');
+}
+
+export function setProxySetting(proxy: string): Promise<void> {
+  return invoke('set_proxy_setting', { proxy });
+}
+
 export function gitListConflicted(bookPath: string): Promise<string[]> {
   return invoke('git_list_conflicted', { bookPath });
 }
