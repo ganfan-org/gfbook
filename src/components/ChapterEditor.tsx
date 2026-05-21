@@ -30,6 +30,8 @@ interface ChapterEditorProps {
 function useTipTapEditor(content: string, onContentChange: (markdown: string) => void, bookPath: string) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onChangeRef = useRef(onContentChange);
+  const lastSavedRef = useRef('');
+  const initializedRef = useRef(false);
   onChangeRef.current = onContentChange;
   const bookPathRef = useRef(bookPath);
   bookPathRef.current = bookPath;
@@ -64,7 +66,7 @@ function useTipTapEditor(content: string, onContentChange: (markdown: string) =>
       ImageWithAsset.configure({ inline: false }),
       Markdown,
     ],
-    content: content ? md.render(content) : '<p></p>',
+    content: content ? md.render(content) : { type: 'doc', content: [{ type: 'paragraph' }] },
     editorProps: {
       handleKeyDown(view, event) {
         if (view.composing && (event.key === 'Enter' || event.key === ' ')) {
@@ -118,7 +120,17 @@ function useTipTapEditor(content: string, onContentChange: (markdown: string) =>
       },
     },
     onUpdate: ({ editor: ed }) => {
-      const markdown = ed.storage.markdown.manager.serialize(ed.getJSON());
+      let markdown = ed.storage.markdown.manager.serialize(ed.getJSON());
+      markdown = markdown.replace(/\n+(\n\s*```)/g, '$1');
+      // First update: store baseline, skip save
+      if (!initializedRef.current) {
+        lastSavedRef.current = markdown;
+        initializedRef.current = true;
+        return;
+      }
+      // Skip if the markdown content hasn't actually changed
+      if (markdown === lastSavedRef.current) return;
+      lastSavedRef.current = markdown;
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         onChangeRef.current(markdown);
