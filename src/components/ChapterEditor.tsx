@@ -4,6 +4,10 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
 import { Mathematics } from '@tiptap/extension-mathematics';
+import { Table } from '@tiptap/extension-table';
+import TableRow from '@tiptap/extension-table-row';
+import TableCell from '@tiptap/extension-table-cell';
+import TableHeader from '@tiptap/extension-table-header';
 import { MarkdownManager } from '@tiptap/markdown';
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog';
 import { open as shellOpen } from '@tauri-apps/plugin-shell';
@@ -15,6 +19,7 @@ import ImageIcon from '@mui/icons-material/Image';
 import LinkIcon from '@mui/icons-material/Link';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import ListIcon from '@mui/icons-material/List';
+import TableChartIcon from '@mui/icons-material/TableChart';
 import FunctionsIcon from '@mui/icons-material/Functions';
 import SuperscriptIcon from '@mui/icons-material/Superscript';
 import TextFieldsIcon from '@mui/icons-material/TextFields';
@@ -44,6 +49,24 @@ interface ChapterEditorProps {
   onContentChange: (markdown: string) => void;
 }
 
+function stripMailtoLinks(node: any): any {
+  if (!node || typeof node !== 'object') return node;
+  if (Array.isArray(node)) return node.map(stripMailtoLinks);
+  const result: any = {};
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'marks' && Array.isArray(value)) {
+      result.marks = value.filter((m: any) => !(m.type === 'link' && m.attrs?.href?.startsWith('mailto:')));
+    } else if (key === 'content' && Array.isArray(value)) {
+      result.content = value.map(stripMailtoLinks);
+    } else if (typeof value === 'object' && value !== null) {
+      result[key] = stripMailtoLinks(value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 function useTipTapEditor(content: string, onContentChange: (markdown: string) => void, bookPath: string, mathEditRef: React.MutableRefObject<((pos: number, type: string, latex: string) => void) | null>) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onChangeRef = useRef(onContentChange);
@@ -70,8 +93,11 @@ function useTipTapEditor(content: string, onContentChange: (markdown: string) =>
         StarterKit.configure({ heading: { levels: [1, 2, 3, 4, 5, 6] }, link: { autolink: false, linkOnPaste: false, openOnClick: false } }),
         Image,
         Mathematics.configure({ katexOptions: { throwOnError: false } }),
+        Table, TableRow, TableCell, TableHeader,
       ];
-      return new MarkdownManager({ extensions: ext }).parse(content);
+      const doc = new MarkdownManager({ extensions: ext }).parse(content);
+      // Strip mailto links from parsed content
+      return stripMailtoLinks(doc);
     } catch { return { type: 'doc', content: [{ type: 'paragraph' }] }; }
   }, [content]);
 
@@ -83,6 +109,7 @@ function useTipTapEditor(content: string, onContentChange: (markdown: string) =>
           StarterKit.configure({ heading: { levels: [1, 2, 3, 4, 5, 6] }, link: { autolink: false, linkOnPaste: false, openOnClick: false } }),
           Image,
         Mathematics.configure({ katexOptions: { throwOnError: false } }),
+        Table, TableRow, TableCell, TableHeader,
         ],
       });
     }
@@ -93,6 +120,8 @@ function useTipTapEditor(content: string, onContentChange: (markdown: string) =>
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3, 4, 5, 6] }, link: { autolink: false, linkOnPaste: false, openOnClick: false } }),
       ImageWithAsset.configure({ inline: false }),
+      Table.configure({ resizable: true }),
+      TableRow, TableCell, TableHeader,
       Mathematics.configure({
         katexOptions: { throwOnError: false },
         blockOptions: {
@@ -394,6 +423,7 @@ export default function ChapterEditor({ content, bookPath, onContentChange }: Ch
           <Tooltip title="Inline math"><IconButton size="small" onClick={() => editMath('inline')} color={editor.isActive('inlineMath') ? 'primary' : 'default'}><SuperscriptIcon fontSize="small" /></IconButton></Tooltip>
           <Tooltip title="Block math"><IconButton size="small" onClick={() => editMath('block')} color={editor.isActive('blockMath') ? 'primary' : 'default'}><FunctionsIcon fontSize="small" /></IconButton></Tooltip>
           <Tooltip title="Insert image"><IconButton size="small" onClick={() => insertImage(editor, bookPath)}><ImageIcon fontSize="small" /></IconButton></Tooltip>
+          <Tooltip title="Insert table"><IconButton size="small" onClick={() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}><TableChartIcon fontSize="small" /></IconButton></Tooltip>
           <Box sx={{ flex: 1 }} />
           <Tooltip title="Table of contents"><IconButton size="small" onClick={() => setTocOpen(!tocOpen)} color={tocOpen ? 'primary' : 'default'}><ListIcon fontSize="small" /></IconButton></Tooltip>
         </>)}

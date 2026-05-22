@@ -146,3 +146,20 @@
 .gtbook-editor .katex-display {
   margin: 0.5em 0;
 }
+
+/* Table styling */
+.gtbook-editor table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.8em 0;
+}
+.gtbook-editor th, .gtbook-editor td {
+  border: 1px solid #ccc;
+  padding: 6px 10px;
+  text-align: left;
+  min-width: 60px;
+}
+.gtbook-editor th {
+  background: rgba(128,128,128,0.08);
+  font-weight: 600;
+}
