@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-GTBook 是一个本地知识库/书的管理桌面应用，每本书是一个 Git 仓库，包含 `gtbook.yaml` 元数据和 `chapters/` 目录下的 Markdown 章节文件。基于 Tauri 2 + React + TypeScript + Vite 构建。
+GTBook 是一个本地知识库/书的管理桌面应用，每本书是一个 Git 仓库，包含 `gtbook.yaml` 元数据和 `chapters/` 目录下的 Markdown 章节文件。基于 Tauri 2 + React 19 + TypeScript + Vite 8 构建。
 
 ## 技术栈
 
@@ -12,40 +12,42 @@ GTBook 是一个本地知识库/书的管理桌面应用，每本书是一个 Gi
 | 前端框架 | React 19 + TypeScript |
 | 构建工具 | Vite 8 |
 | UI 库 | MUI (Material UI) 7 |
-| Markdown 编辑器 | TipTap + tiptap-markdown (基于 ProseMirror) |
+| Markdown 编辑器 | TipTap v3 + @tiptap/markdown |
+| 数学公式 | KaTeX + @tiptap/extension-mathematics |
 | YAML 解析 | serde_yaml (Rust) |
 | UUID | uuid v4 (Rust) |
-| Git | 通过 CLI 调用 git 命令 |
+| Git | git2-rs (libgit2 绑定，无需 CLI) |
+| 图片 | 存 assets/ 目录 + data URL 显示 |
 
 ## 项目结构
 
 ```
 gtbook-tauri/
-├── src-tauri/                    # Rust 后端
+├── src-tauri/
 │   ├── src/
 │   │   ├── main.rs               # 入口
-│   │   ├── lib.rs                # Tauri 构建器 + 注册 16 个命令
-│   │   ├── models.rs             # 数据模型：Chapter, BookMeta, BookInfo, CommitInfo
-│   │   ├── commands.rs           # 所有 Tauri 命令实现 (~450行)
-│   │   └── git.rs                # Git 操作封装 (init, status, commit, log)
+│   │   ├── lib.rs                # Tauri 构建器 + 注册 30+ 个命令
+│   │   ├── models.rs             # 数据模型（含 #[serde(default)] 兼容旧 YAML）
+│   │   ├── commands.rs           # 所有 Tauri 命令实现 (~900行)
+│   │   └── git.rs                # Git2-rs 操作封装 (init/status/commit/push/pull/fetch)
 │   ├── Cargo.toml
-│   ├── tauri.conf.json           # 窗口 1200x800, 标题 GTBook
-│   └── capabilities/default.json # 权限: core, opener, dialog
-├── src/                          # React 前端
-│   ├── main.tsx                  # 入口
-│   ├── App.tsx                   # 根组件：ThemeProvider + 页面切换
-│   ├── types/index.ts            # TypeScript 类型定义（与 Rust models 对应）
-│   ├── utils/commands.ts         # Tauri invoke 调用封装 (16个函数)
+│   ├── tauri.conf.json
+│   └── capabilities/default.json
+├── src/
+│   ├── main.tsx
+│   ├── App.tsx                   # 主题（亮/暗）+ 页面切换 + 关闭前自动提交
+│   ├── types/index.ts
+│   ├── utils/commands.ts
 │   ├── hooks/
-│   │   ├── useBooks.ts           # 书架管理 (列表/新建/导入/删除)
-│   │   └── useBook.ts            # 单书操作 (章节CRUD/拖拽/Git)
+│   │   ├── useBooks.ts           # 书架管理 + 全局设置
+│   │   └── useBook.ts            # 章节 CRUD / Git / 自动提交
 │   ├── components/
-│   │   ├── ChapterTree.tsx       # 章节目录树 (递归渲染 + 鼠标拖拽)
-│   │   ├── ChapterEditor.tsx     # TipTap 编辑器 (500ms 防抖保存)
-│   │   └── ChapterEditor.css     # TipTap 编辑器样式
+│   │   ├── ChapterTree.tsx       # 章节目录树（鼠标拖拽、右键菜单、重命名 Dialog）
+│   │   ├── ChapterEditor.tsx     # TipTap v3 编辑器
+│   │   └── ChapterEditor.css     # 编辑器样式
 │   └── pages/
-│       ├── BookShelf.tsx         # 首页：iBooks 风格书架 (封面+网格布局)
-│       └── BookDetail.tsx        # 详情页：左侧目录 + 右侧编辑器
+│       ├── BookShelf.tsx         # iBooks 风格书架
+│       └── BookDetail.tsx        # 详情页（可拖拽宽度的侧边栏 + 编辑器）
 ├── package.json
 ├── tsconfig.json
 ├── vite.config.mts
@@ -54,19 +56,22 @@ gtbook-tauri/
 
 ## 数据模型
 
-每本书在磁盘上的结构：
+每本书独立存储在任意路径下（默认 `~/gtbooks/{slug}/`）：
+
 ```
-{app_data_dir}/books/{book-name}/
+~/gtbooks/{book-name}/
 ├── gtbook.yaml       # 元数据
-└── chapters/
-    ├── {uuid}.md     # 每章一个文件
-    └── ...
+├── chapters/
+│   ├── {uuid}.md     # 每章一个文件
+│   └── ...
+└── assets/
+    └── {uuid}.png    # 图片附件
 ```
 
 `gtbook.yaml` 格式：
 ```yaml
 title: "书名"
-created_time: 1715000000000
+created_time: 1715000000000      # 可选，缺失默认0
 updated_time: 1715000000123
 chapters:
   - id: "uuid-v4"
@@ -81,67 +86,98 @@ chapters:
         chapters: []
 ```
 
-## Rust 后端 — 16 个 Tauri 命令
+应用配置存储在 `{app_data_dir}/gtbook-config.json`，记录已打开的书路径列表。
 
-| # | 命令 | 参数 | 返回值 | 说明 |
-|---|------|------|--------|------|
-| 1 | `list_books` | `app_handle` | `Vec<BookInfo>` | 扫描 `{app_data}/books/` 下所有含 `gtbook.yaml` 的目录 |
-| 2 | `new_book` | `title` | `BookInfo` | 创建目录 + `gtbook.yaml` + `chapters/` + `git init` |
-| 3 | `delete_book` | `book_path` | `()` | 递归删除整个书目录 |
-| 4 | `import_book` | `folder_path` | `BookInfo` | 验证目标目录有 `gtbook.yaml` |
-| 5 | `get_book_meta` | `book_path` | `BookMeta` | 解析 `gtbook.yaml` |
-| 6 | `read_chapter` | `book_path, chapter_id` | `String` | 读取 `chapters/{id}.md` |
-| 7 | `write_chapter` | `book_path, chapter_id, content` | `()` | 写文件 + 更新 chapter.updated_time |
-| 8 | `new_chapter` | `book_path, parent_id?, title` | `Chapter` | 生成 UUID + 写入 `# Title` + 追加到父节点 |
-| 9 | `delete_chapter` | `book_path, chapter_id` | `()` | 递归删除章节及其所有子章节 |
-| 10 | `rename_chapter` | `book_path, chapter_id, new_title` | `()` | 更新 title |
-| 11 | `move_chapter` | `book_path, chapter_id, target_id?, position` | `()` | 移动章节, position: "before" \| "after" \| "inner" |
-| 12 | `move_chapter_up` | `book_path, chapter_id` | `()` | 与上一个兄弟节点交换 |
-| 13 | `move_chapter_down` | `book_path, chapter_id` | `()` | 与下一个兄弟节点交换 |
-| 14 | `git_status` | `book_path` | `String` | `git status --porcelain` |
-| 15 | `git_commit` | `book_path, message` | `()` | `git add .` → `git commit -m` |
-| 16 | `git_log` | `book_path, max_count?` | `Vec<CommitInfo>` | 解析 `git log --format=%H|||%s|||%an|||%ct` |
+## Rust 后端 — 主要 Tauri 命令
+
+### 书管理 (7)
+`list_books`, `new_book`, `delete_book`, `rename_book`, `import_book`, `get_books_dir_info`, `set_books_dir`
+
+### 章节 CRUD (7)
+`get_book_meta`, `read_chapter`, `write_chapter`, `new_chapter`, `delete_chapter`, `rename_chapter`, `move_chapter`（支持 before/after/inner 位置）
+
+### Git 操作 (10)
+`git_status`, `git_commit`, `git_log`, `git_remote_url`, `git_remote_set_url`, `git_fetch`, `git_pull`, `git_push`, `git_ahead_behind`, `git_list_conflicted`
+
+### 用户配置 (6)
+`git_user_config`, `git_set_user_config`, `get_global_git_user`, `set_global_git_user`, `get_proxy_setting`, `set_proxy_setting`
+
+### 工具 (5)
+`read_file_base64`, `read_image_as_data_url`, `save_image_to_book`, `save_image_data`, `download_image_url`, `reveal_in_finder`, `path_exists`
 
 ## 前端组件树
 
 ```
-<App>
-  ├─ <BookShelf>          首页（书架）
-  │    ├─ 书列表（MUI Card）
-  │    ├─ 新建书 Dialog
-  │    ├─ 导入书（@tauri-apps/plugin-dialog 文件选择器）
-  │    └─ 删除确认 Dialog
+<App> (ThemeProvider: 亮/暗模式, auto-commit on close)
+  ├─ <BookShelf>          首页
+  │    ├─ 书封面网格（渐变色 + 缩写）
+  │    ├─ 右键菜单：重命名 / 删除
+  │    ├─ Open Book（任意 gtbook.yaml 文件夹）
+  │    ├─ New Book（Dialog：书名 + 文件夹名 + 位置选择 + 校验）
+  │    └─ Settings Dialog（Git Author + Proxy）
   └─ <BookDetail>         详情页
-       ├─ [左侧 Drawer 280px] <ChapterTree>
+       ├─ [可拖拽侧边栏] <ChapterTree>
        │    ├─ 递归渲染的章节节点
-       │    ├─ 展开/折叠（有子节点 + 文件夹图标）
-       │    ├─ 内联重命名（TextField）
-       │    ├─ 右键菜单：添加子章节 / 重命名 / 删除
-       │    └─ 鼠标拖拽重排（基于 mousedown/mousemove/mouseup，position 分上中下 25%）
+       │    ├─ 展开/折叠
+       │    ├─ 右键菜单：添加子章节 / 重命名 Dialog / 删除
+       │    ├─ 鼠标拖拽重排（自定义鼠标事件）
+       │    └─ Git 状态栏 + Settings 入口（点击打开 Settings Dialog）
        └─ [右侧主区域] <ChapterEditor>
-            ├─ 章节标题头
-            └─ Milkdown WYSIWYG 编辑器 (Nord 主题 + CommonMark + 500ms 防抖自动保存)
+            ├─ 排版工具栏：T / H1-H3 / B I / 列表 / 链接 / 公式 / 图片 / 表格 / TOC
+            ├─ TOC 侧边栏（可开关）
+            └─ WYSIWYG 编辑器（500ms 防抖自动保存）
 ```
 
 ## 关键技术决策
 
-### 1. 拖拽方案
-Tauri 的 WKWebView 对原生 HTML5 Drag & Drop API（`draggable`, `dragStart`, `dragOver`, `drop`）支持不完善，点击事件直接触发 `dragStart`+`dragEnd` 但不触发 `dragOver`/`drop`。因此采用**自定义鼠标事件方案**：
-- `onMouseDown` 开始追踪
-- 全局 `mousemove` 监听器，移动 >5px 进入拖拽模式
-- `document.elementFromPoint()` + `[data-chapter-id]` 属性定位目标
-- 根据鼠标 Y 位置在目标元素高度中的百分比判定：上 25% = before，下 25% = after，中间 50% = inner
+### 1. 编辑器选型
+从 Milkdown 迁移到 **TipTap v3**。Milkdown 在 WKWebView 上中文 IME 输入有拼音残留、Schema 兼容问题。TipTap 更成熟，官方扩展生态完善。
 
-### 2. 编辑器自动保存
-Milkdown `listener` 插件监听内容变化，500ms 防抖后通过 Tauri invoke 写入文件。编辑器组件通过 `key={selectedChapter.id}` 强制重建（章节切换时），`useEditor` 空依赖 `[]` 避免输入过程中重建。
+已安装的扩展：StarterKit（标题/加粗/斜体/列表/引用/代码块）、Image、Mathematics（KaTeX）、Table、MarkdownManager。
 
-### 3. 内容加载顺序
-`selectChapter` 先读取文件内容再设置 `selectedChapterId`，确保编辑器挂载时内容已就绪。
+### 2. Markdown 解析与序列化
+使用 `@tiptap/markdown` 的 `MarkdownManager`：
+- 加载：`MarkdownManager.parse(content)` 将 md 解析为 ProseMirror JSON
+- 保存：`MarkdownManager.serialize(editor.getJSON())` 序列化回 md
+- 初始内容用 `useMemo` 预解析，避免每次渲染重复解析
+- 代码块空行修复：保存时正则替换多余空行
+
+### 3. IME 中文输入防护
+```tsx
+handleKeyDown(view, event) {
+  if (view.composing && (event.key === 'Enter' || event.key === ' ')) {
+    event.preventDefault(); return true;
+  }
+}
+```
+防止输入法选词时被列表的 `splitListItem` 命令拦截。
+
+### 4. 图片处理
+- 插入：选择或粘贴图片 → 保存到 `assets/{uuid}.{ext}` → 显示用 data URL
+- 粘贴外部图片（知乎等）→ 后台上传下载到本地
+- 不依赖自定义协议或 `asset://` 协议
+
+### 5. 拖拽重排
+WKWebView 对 HTML5 DnD 支持不完善，采用自定义 `mousedown`/`mousemove`/`mouseup` 实现：
+- `elementFromPoint()` + `data-chapter-id` 属性定位目标
+- Y 位置百分比判定：上 25% = before，中间 50% = inner，下 25% = after
+
+### 6. Git 集成
+使用 `git2-rs` 直接操作仓库，不依赖 `git` CLI。支持：
+- 自动提交（每 10 分钟 / 切换章节 / 关闭应用）
+- 远程同步（Fetch/Pull/Push，SSH 或 HTTPS）
+- 冲突检测
+- 代理配置
+
+### 7. 自动保存
+- 编辑器内容变化 → 串行化 markdown → 与上次保存内容比较 → 有变化则 500ms 防抖写入
+- 首次加载和图片异步加载时跳过保存
+- 切换章节 / 关闭应用时立即自动提交
 
 ## 开发命令
 
 ```bash
-npm run tauri dev       # 开发模式（热更新 + Tauri 窗口）
+npm run tauri dev       # 开发模式
 npm run tauri build     # 生产构建
 npm run build           # 仅前端构建
 npm run dev             # 仅前端开发服务器
@@ -150,17 +186,18 @@ cargo build             # 仅 Rust 后端构建
 
 ## 已知问题
 
-1. 编辑器仅加载了 `commonmark` preset，未启用 `gfm`、`math`、`diagram` 等插件（需安装对应 `@milkdown/plugin-*` 包并注册）
-2. Git 操作通过调用 `git` CLI 实现，依赖系统安装 Git
-3. 新建书默认保存到 `{app_data_dir}/books/`，不支持用户自定义路径
-4. 章节文件命名使用 UUID，无直观文件名
+1. **`@tiptap/markdown` 的 content 解析未生效** — `useEditor({ content: markdownString })` 不能直接用原始 markdown，需通过 `MarkdownManager.parse()` 预解析为 JSON
+2. **图片粘贴依赖网络下载** — 从网页粘贴图片需要 `download_image_url` 命令，每次打开文档时扫描外链图片并下载
+3. **数学公式编辑** — 点击公式弹出 Dialog 编辑，但 KaTeX 渲染在有错误时显示 `\Box` 框
+4. **`@tiptap/markdown` Link mark 序列化** — 链接在 markdown 中输出为 `[text](url)`，但删除链接后需要自定义 ProseMirror 事务（`tr.removeMark()`）而非依赖选区
 
-## 可能的扩展方向
+## 扩展方向
 
-1. 添加 `gfm`、`math`、`diagram` 插件到编辑器
-2. 章节拖拽时支持跨父级结构的动画过渡
-3. Git 面板：查看 diff、提交历史、分支切换
-4. 导入/导出为 ZIP
-5. 书的自定义存储路径
-6. 搜索功能（全文搜索章节内容）
-7. 文档导出（PDF/HTML）
+1. 全文搜索
+2. 导出 PDF/HTML
+3. 思维导图 / Mermaid 图表
+4. Markdown 源文件直接编辑（Monaco Editor）
+5. 书的多标签页支持
+6. 差异对比 / 历史版本
+7. 上传 Mac App Store
+8. 书签 / 标注 / 笔记功能
