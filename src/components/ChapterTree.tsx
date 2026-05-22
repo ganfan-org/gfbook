@@ -298,7 +298,7 @@ export default function ChapterTree({ chapters, selectedId, onSelect, onAddChild
             fullWidth
             value={renameDialogValue}
             onChange={(e) => setRenameDialogValue(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleRenameConfirm(); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleRenameConfirm(); } }}
           />
         </DialogContent>
         <DialogActions>
