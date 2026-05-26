@@ -46,7 +46,7 @@ pub fn run() {
             set_proxy_setting,
             git_list_conflicted,
             read_file_base64,
-            read_image_as_data_url,
+            get_asset_url,
             save_image_to_book,
             save_image_data,
             download_image_url,

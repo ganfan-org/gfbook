@@ -22,6 +22,7 @@ import { Box, Typography } from '@mui/material'
 import EditorToolbar from './EditorToolbar'
 import LinkDialog from './LinkDialog'
 import MathDialog from './MathDialog'
+import { getAssetUrl } from '../utils/commands'
 import 'katex/dist/katex.min.css'
 import './ChapterEditor.css'
 
@@ -190,13 +191,10 @@ function useTipTapEditor(
                   dataBase64: base64,
                   ext,
                 })
-                const displayUrl: string = await invoke(
-                  'read_image_as_data_url',
-                  { bookPath: bookPathRef.current, relPath },
-                )
+                const assetUrl = await getAssetUrl(bookPathRef.current, relPath)
                 const node = view.state.schema.nodes.image.create({
                   src: relPath,
-                  dataSrc: displayUrl,
+                  dataSrc: assetUrl,
                 })
                 view.dispatch(view.state.tr.replaceSelectionWith(node))
               } catch (err) {
@@ -256,15 +254,12 @@ function useTipTapEditor(
     ;(async () => {
       for (const { pos, src } of todo) {
         try {
-          const dataUrl = await invoke('read_image_as_data_url', {
-            bookPath: bookPathRef.current,
-            relPath: src,
-          })
+          const assetUrl = await getAssetUrl(bookPathRef.current, src)
           if (editor.view) {
             const tr = editor.state.tr
             tr.setNodeMarkup(pos, undefined, {
               ...editor.state.doc.nodeAt(pos)?.attrs,
-              dataSrc: dataUrl,
+              dataSrc: assetUrl,
             })
             editor.view.dispatch(tr)
           }
@@ -299,16 +294,13 @@ async function insertImage(
       bookPath,
       sourcePath: selected,
     })
-    const dataUrl: string = await invoke('read_image_as_data_url', {
-      bookPath,
-      relPath,
-    })
+    const assetUrl = await getAssetUrl(bookPath, relPath)
     editor
       .chain()
       .focus()
       .insertContent({
         type: 'image',
-        attrs: { src: relPath, dataSrc: dataUrl },
+        attrs: { src: relPath, dataSrc: assetUrl },
       })
       .run()
   } catch (e) {
@@ -591,11 +583,11 @@ export default function ChapterEditor({
       })
       for (const { url } of todo) {
         try {
-          const relPath = await invoke('download_image_url', { bookPath, url })
-          const dataUrl = await invoke('read_image_as_data_url', {
+          const relPath = (await invoke('download_image_url', {
             bookPath,
-            relPath,
-          })
+            url,
+          })) as string
+          const assetUrl = await getAssetUrl(bookPath, relPath)
           let found = false
           editor.state.doc.descendants((node, pos) => {
             if (!found && node.attrs.src === url) {
@@ -604,7 +596,7 @@ export default function ChapterEditor({
                 const tr = editor.state.tr
                 tr.setNodeMarkup(pos, undefined, {
                   src: relPath,
-                  dataSrc: dataUrl,
+                  dataSrc: assetUrl,
                 })
                 editor.view.dispatch(tr)
               }

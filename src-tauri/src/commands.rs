@@ -690,7 +690,7 @@ pub fn read_file_base64(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn read_image_as_data_url(book_path: String, rel_path: String) -> Result<String, String> {
+pub fn get_asset_url(book_path: String, rel_path: String) -> Result<String, String> {
     let book_canonical = PathBuf::from(&book_path)
         .canonicalize()
         .map_err(|e| format!("Invalid book path: {}", e))?;
@@ -701,21 +701,7 @@ pub fn read_image_as_data_url(book_path: String, rel_path: String) -> Result<Str
     if !canonical.starts_with(&book_canonical) {
         return Err("Access denied: image path is outside book directory".to_string());
     }
-    let data = fs::read(&full_path).map_err(|e| format!("Failed to read image: {}", e))?;
-    let ext = full_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("png")
-        .to_lowercase();
-    let mime = match ext.as_str() {
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "svg" => "image/svg+xml",
-        _ => "image/png",
-    };
-    let b64 = base64_encode(&data);
-    Ok(format!("data:{};base64,{}", mime, b64))
+    Ok(canonical.to_string_lossy().to_string())
 }
 
 fn base64_encode(data: &[u8]) -> String {
