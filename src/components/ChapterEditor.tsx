@@ -1,31 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
-import { useEditor, EditorContent } from '@tiptap/react'
-import StarterKit from '@tiptap/starter-kit'
-import Image from '@tiptap/extension-image'
-import { Mathematics } from '@tiptap/extension-mathematics'
-import { Table } from '@tiptap/extension-table'
-import TableRow from '@tiptap/extension-table-row'
-import TableCell from '@tiptap/extension-table-cell'
-import TableHeader from '@tiptap/extension-table-header'
-import { MarkdownManager } from '@tiptap/markdown'
-import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
-import { open as shellOpen } from '@tauri-apps/plugin-shell'
 import FormatBoldIcon from '@mui/icons-material/FormatBold'
 import FormatItalicIcon from '@mui/icons-material/FormatItalic'
 import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted'
 import FormatListNumberedIcon from '@mui/icons-material/FormatListNumbered'
+import FunctionsIcon from '@mui/icons-material/Functions'
 import ImageIcon from '@mui/icons-material/Image'
 import LinkIcon from '@mui/icons-material/Link'
 import LinkOffIcon from '@mui/icons-material/LinkOff'
 import ListIcon from '@mui/icons-material/List'
-import TableChartIcon from '@mui/icons-material/TableChart'
-import FunctionsIcon from '@mui/icons-material/Functions'
-import SuperscriptIcon from '@mui/icons-material/Superscript'
-import TextFieldsIcon from '@mui/icons-material/TextFields'
+import Looks3Icon from '@mui/icons-material/Looks3'
 import LooksOneIcon from '@mui/icons-material/LooksOne'
 import LooksTwoIcon from '@mui/icons-material/LooksTwo'
-import Looks3Icon from '@mui/icons-material/Looks3'
+import SuperscriptIcon from '@mui/icons-material/Superscript'
+import TableChartIcon from '@mui/icons-material/TableChart'
+import TextFieldsIcon from '@mui/icons-material/TextFields'
 import {
   Box,
   Button,
@@ -38,7 +25,28 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
+import { invoke } from '@tauri-apps/api/core'
+import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
+import { open as shellOpen } from '@tauri-apps/plugin-shell'
+import Image from '@tiptap/extension-image'
+import { Mathematics } from '@tiptap/extension-mathematics'
+import { Table } from '@tiptap/extension-table'
+import TableCell from '@tiptap/extension-table-cell'
+import TableHeader from '@tiptap/extension-table-header'
+import TableRow from '@tiptap/extension-table-row'
+import { MarkdownManager } from '@tiptap/markdown'
+import { useEditor, EditorContent } from '@tiptap/react'
+import StarterKit from '@tiptap/starter-kit'
 import katex from 'katex'
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import 'katex/dist/katex.min.css'
 import './ChapterEditor.css'
 
@@ -161,8 +169,8 @@ function useTipTapEditor(
     return serializerRef.current
   }, [])
 
-  const editor = useEditor({
-    extensions: [
+  const editorExtensions = useMemo(
+    () => [
       StarterKit.configure({
         heading: { levels: [1, 2, 3, 4, 5, 6] },
         link: { autolink: false, linkOnPaste: false, openOnClick: false },
@@ -186,9 +194,12 @@ function useTipTapEditor(
         },
       }),
     ],
-    content: parsedContent,
-    editorProps: {
-      handleKeyDown(view, event) {
+    [],
+  )
+
+  const editorProps = useMemo(
+    () => ({
+      handleKeyDown(view: any, event: KeyboardEvent) {
         if (view.composing && (event.key === 'Enter' || event.key === ' ')) {
           event.preventDefault()
           return true
@@ -199,7 +210,7 @@ function useTipTapEditor(
         }
         return false
       },
-      handlePaste: (view, event) => {
+      handlePaste: (view: any, event: ClipboardEvent) => {
         const items = event.clipboardData?.items
         if (!items) return false
         for (let i = 0; i < items.length; i++) {
@@ -239,9 +250,16 @@ function useTipTapEditor(
         return false
       },
       attributes: { class: 'gtbook-editor' },
-      transformPastedHTML: (html) =>
+      transformPastedHTML: (html: string) =>
         html.replace(/<a\s[^>]*href="mailto:[^"]*"[^>]*>(.*?)<\/a>/gi, '$1'),
-    },
+    }),
+    [],
+  )
+
+  const editor = useEditor({
+    extensions: editorExtensions,
+    content: parsedContent,
+    editorProps,
     onUpdate: ({ editor: ed }) => {
       let markdown = ''
       try {
@@ -348,6 +366,103 @@ function handleLinkSubmit(
   close(false)
 }
 
+interface EditorAreaProps {
+  editor: ReturnType<typeof useEditor>
+  tocOpen: boolean
+  tocItems: { level: number; text: string; pos: number }[]
+  scrollContainerRef: React.RefObject<HTMLDivElement | null>
+}
+
+const EditorArea = memo(function EditorArea({
+  editor,
+  tocOpen,
+  tocItems,
+  scrollContainerRef,
+}: EditorAreaProps) {
+  return (
+    <Box sx={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+      <Box
+        ref={scrollContainerRef}
+        sx={{
+          position: 'absolute',
+          inset: 0,
+          right: tocOpen ? 220 : 0,
+          overflow: 'auto',
+        }}
+      >
+        {editor ? (
+          <EditorContent editor={editor} />
+        ) : (
+          <Box sx={{ p: 4 }}>
+            <Typography color="text.secondary">Loading editor...</Typography>
+          </Box>
+        )}
+      </Box>
+      {tocOpen && (
+        <Box
+          sx={{
+            position: 'absolute',
+            top: 0,
+            right: 0,
+            bottom: 0,
+            width: 220,
+            borderLeft: 1,
+            borderColor: 'divider',
+            overflow: 'auto',
+            p: 1.5,
+            bgcolor: (t) =>
+              t.palette.mode === 'dark' ? 'grey.900' : 'grey.50',
+          }}
+        >
+          <Typography
+            variant="subtitle2"
+            color="text.secondary"
+            sx={{
+              mb: 1,
+              fontSize: '0.75rem',
+              textTransform: 'uppercase',
+              letterSpacing: 1,
+            }}
+          >
+            Contents
+          </Typography>
+          {tocItems.length === 0 ? (
+            <Typography variant="caption" color="text.secondary">
+              No headings
+            </Typography>
+          ) : (
+            tocItems.map((item, i) => (
+              <Box
+                key={i}
+                onClick={() => {
+                  editor?.commands.setTextSelection(item.pos)
+                  editor?.commands.focus()
+                }}
+                sx={{
+                  pl: item.level * 1.5,
+                  py: 0.4,
+                  cursor: 'pointer',
+                  borderRadius: 0.5,
+                  fontSize: '0.82rem',
+                  color: 'text.secondary',
+                  borderLeft: '2px solid transparent',
+                  '&:hover': {
+                    bgcolor: 'action.hover',
+                    color: 'text.primary',
+                    borderLeftColor: 'primary.main',
+                  },
+                }}
+              >
+                {item.text}
+              </Box>
+            ))
+          )}
+        </Box>
+      )}
+    </Box>
+  )
+})
+
 export default function ChapterEditor({
   content,
   bookPath,
@@ -373,6 +488,8 @@ export default function ChapterEditor({
   const mathEditRef = useRef<
     ((pos: number, type: string, latex: string) => void) | null
   >(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const savedScrollTopRef = useRef<number | null>(null)
 
   const editor = useTipTapEditor(
     content,
@@ -420,6 +537,7 @@ export default function ChapterEditor({
 
   const handleLinkUpdate = () => {
     if (!editor || !linkUrl.trim()) return
+    savedScrollTopRef.current = scrollContainerRef.current?.scrollTop ?? null
     if (linkInEdit && linkPos !== null && linkPos2 !== null) {
       // Update existing link: remove old mark, add new one
       const tr = editor.state.tr
@@ -452,7 +570,17 @@ export default function ChapterEditor({
       linkDom = (editor as any)?.view?.dom
     } catch {}
     if (!linkDom) return
-    const handler = (e: MouseEvent) => {
+
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      const a = target.closest('a')
+      if (!a) return
+      e.preventDefault()
+      e.stopPropagation()
+      savedScrollTopRef.current = scrollContainerRef.current?.scrollTop ?? null
+    }
+
+    const onClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement
       const a = target.closest('a')
       if (!a) return
@@ -474,9 +602,27 @@ export default function ChapterEditor({
       setLinkPos2(to)
       setLinkDialogOpen(true)
     }
-    linkDom.addEventListener('click', handler, true)
-    return () => linkDom.removeEventListener('click', handler, true)
+
+    linkDom.addEventListener('mousedown', onMouseDown, true)
+    linkDom.addEventListener('click', onClick, true)
+    return () => {
+      linkDom.removeEventListener('mousedown', onMouseDown, true)
+      linkDom.removeEventListener('click', onClick, true)
+    }
   }, [editor])
+
+  useLayoutEffect(() => {
+    if (savedScrollTopRef.current != null && scrollContainerRef.current) {
+      const scrollTop = savedScrollTopRef.current
+      savedScrollTopRef.current = null
+      scrollContainerRef.current.scrollTop = scrollTop
+      requestAnimationFrame(() => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = scrollTop
+        }
+      })
+    }
+  }, [linkDialogOpen])
 
   useEffect(() => {
     if (!editor) return
@@ -774,80 +920,22 @@ export default function ChapterEditor({
           </>
         )}
       </Box>
-      <Box sx={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        <Box sx={{ flex: 1, overflow: 'auto' }}>
-          {editor ? (
-            <EditorContent editor={editor} />
-          ) : (
-            <Box sx={{ p: 4 }}>
-              <Typography color="text.secondary">Loading editor...</Typography>
-            </Box>
-          )}
-        </Box>
-        {tocOpen && (
-          <Box
-            sx={{
-              width: 220,
-              flexShrink: 0,
-              borderLeft: 1,
-              borderColor: 'divider',
-              overflow: 'auto',
-              p: 1.5,
-              bgcolor: (t) =>
-                t.palette.mode === 'dark' ? 'grey.900' : 'grey.50',
-            }}
-          >
-            <Typography
-              variant="subtitle2"
-              color="text.secondary"
-              sx={{
-                mb: 1,
-                fontSize: '0.75rem',
-                textTransform: 'uppercase',
-                letterSpacing: 1,
-              }}
-            >
-              Contents
-            </Typography>
-            {tocItems.length === 0 ? (
-              <Typography variant="caption" color="text.secondary">
-                No headings
-              </Typography>
-            ) : (
-              tocItems.map((item, i) => (
-                <Box
-                  key={i}
-                  onClick={() => {
-                    editor?.commands.setTextSelection(item.pos)
-                    editor?.commands.focus()
-                  }}
-                  sx={{
-                    pl: item.level * 1.5,
-                    py: 0.4,
-                    cursor: 'pointer',
-                    borderRadius: 0.5,
-                    fontSize: '0.82rem',
-                    color: 'text.secondary',
-                    borderLeft: '2px solid transparent',
-                    '&:hover': {
-                      bgcolor: 'action.hover',
-                      color: 'text.primary',
-                      borderLeftColor: 'primary.main',
-                    },
-                  }}
-                >
-                  {item.text}
-                </Box>
-              ))
-            )}
-          </Box>
-        )}
-      </Box>
+      <EditorArea
+        editor={editor}
+        tocOpen={tocOpen}
+        tocItems={tocItems}
+        scrollContainerRef={scrollContainerRef}
+      />
       <Dialog
         open={linkDialogOpen}
-        onClose={() => setLinkDialogOpen(false)}
+        onClose={() => {
+          savedScrollTopRef.current =
+            scrollContainerRef.current?.scrollTop ?? null
+          setLinkDialogOpen(false)
+        }}
         maxWidth="xs"
         fullWidth
+        disableScrollLock
       >
         <DialogTitle
           sx={{
@@ -891,6 +979,8 @@ export default function ChapterEditor({
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault()
+                savedScrollTopRef.current =
+                  scrollContainerRef.current?.scrollTop ?? null
                 if (linkInEdit) handleLinkUpdate()
                 else handleLinkSubmit(editor, linkUrl, setLinkDialogOpen)
               }
@@ -903,6 +993,8 @@ export default function ChapterEditor({
               variant="outlined"
               color="error"
               onClick={() => {
+                savedScrollTopRef.current =
+                  scrollContainerRef.current?.scrollTop ?? null
                 try {
                   if (!editor) return
                   if (linkPos !== null && linkPos2 !== null) {
@@ -926,6 +1018,8 @@ export default function ChapterEditor({
           <Box sx={{ flex: 1 }} />
           <Button
             onClick={() => {
+              savedScrollTopRef.current =
+                scrollContainerRef.current?.scrollTop ?? null
               if (linkInEdit) handleLinkUpdate()
               else handleLinkSubmit(editor, linkUrl, setLinkDialogOpen)
             }}
