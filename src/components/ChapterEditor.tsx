@@ -1,43 +1,3 @@
-import FormatBoldIcon from '@mui/icons-material/FormatBold'
-import FormatItalicIcon from '@mui/icons-material/FormatItalic'
-import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted'
-import FormatListNumberedIcon from '@mui/icons-material/FormatListNumbered'
-import FunctionsIcon from '@mui/icons-material/Functions'
-import ImageIcon from '@mui/icons-material/Image'
-import LinkIcon from '@mui/icons-material/Link'
-import LinkOffIcon from '@mui/icons-material/LinkOff'
-import ListIcon from '@mui/icons-material/List'
-import Looks3Icon from '@mui/icons-material/Looks3'
-import LooksOneIcon from '@mui/icons-material/LooksOne'
-import LooksTwoIcon from '@mui/icons-material/LooksTwo'
-import SuperscriptIcon from '@mui/icons-material/Superscript'
-import TableChartIcon from '@mui/icons-material/TableChart'
-import TextFieldsIcon from '@mui/icons-material/TextFields'
-import {
-  Box,
-  Button,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  IconButton,
-  TextField,
-  Tooltip,
-  Typography,
-} from '@mui/material'
-import { invoke } from '@tauri-apps/api/core'
-import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
-import { open as shellOpen } from '@tauri-apps/plugin-shell'
-import Image from '@tiptap/extension-image'
-import { Mathematics } from '@tiptap/extension-mathematics'
-import { Table } from '@tiptap/extension-table'
-import TableCell from '@tiptap/extension-table-cell'
-import TableHeader from '@tiptap/extension-table-header'
-import TableRow from '@tiptap/extension-table-row'
-import { MarkdownManager } from '@tiptap/markdown'
-import { useEditor, EditorContent } from '@tiptap/react'
-import StarterKit from '@tiptap/starter-kit'
-import katex from 'katex'
 import {
   memo,
   useCallback,
@@ -47,23 +7,23 @@ import {
   useRef,
   useState,
 } from 'react'
+import { invoke } from '@tauri-apps/api/core'
+import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
+import { useEditor, EditorContent } from '@tiptap/react'
+import StarterKit from '@tiptap/starter-kit'
+import Image from '@tiptap/extension-image'
+import { Mathematics } from '@tiptap/extension-mathematics'
+import { Table } from '@tiptap/extension-table'
+import TableCell from '@tiptap/extension-table-cell'
+import TableHeader from '@tiptap/extension-table-header'
+import TableRow from '@tiptap/extension-table-row'
+import { MarkdownManager } from '@tiptap/markdown'
+import { Box, Typography } from '@mui/material'
+import EditorToolbar from './EditorToolbar'
+import LinkDialog from './LinkDialog'
+import MathDialog from './MathDialog'
 import 'katex/dist/katex.min.css'
 import './ChapterEditor.css'
-
-function MathPreview({ latex }: { latex: string }) {
-  const html = useMemo(() => {
-    if (!latex.trim()) return '<span style="color:#999">Preview</span>'
-    try {
-      return katex.renderToString(latex, {
-        throwOnError: true,
-        displayMode: true,
-      })
-    } catch (e: any) {
-      return `<span style="color:#d32f2f">${e.message || 'Invalid LaTeX'}</span>`
-    }
-  }, [latex])
-  return <span dangerouslySetInnerHTML={{ __html: html }} />
-}
 
 interface ChapterEditorProps {
   content: string
@@ -356,16 +316,6 @@ async function insertImage(
   }
 }
 
-function handleLinkSubmit(
-  editor: ReturnType<typeof useEditor>,
-  url: string,
-  close: (v: boolean) => void,
-) {
-  if (!editor || !url.trim()) return
-  editor.chain().focus().toggleLink({ href: url.trim() }).run()
-  close(false)
-}
-
 interface EditorAreaProps {
   editor: ReturnType<typeof useEditor>
   tocOpen: boolean
@@ -537,7 +487,6 @@ export default function ChapterEditor({
 
   const handleLinkUpdate = () => {
     if (!editor || !linkUrl.trim()) return
-    savedScrollTopRef.current = scrollContainerRef.current?.scrollTop ?? null
     if (linkInEdit && linkPos !== null && linkPos2 !== null) {
       // Update existing link: remove old mark, add new one
       const tr = editor.state.tr
@@ -738,361 +687,67 @@ export default function ChapterEditor({
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <Box
-        sx={{
-          px: 1,
-          py: 0.3,
-          borderBottom: 1,
-          borderColor: 'divider',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 0.3,
-          minHeight: 38,
-          flexWrap: 'wrap',
+      <EditorToolbar
+        editor={editor}
+        tocOpen={tocOpen}
+        bookPath={bookPath}
+        onToggleToc={() => setTocOpen(!tocOpen)}
+        onAddLink={() => {
+          setLinkUrl('https://')
+          setLinkInEdit(false)
+          setLinkText('')
+          setLinkDialogOpen(true)
         }}
-      >
-        {editor && (
-          <>
-            <Tooltip title="Paragraph">
-              <IconButton
-                size="small"
-                onClick={() => editor.chain().focus().setParagraph().run()}
-                color={editor.isActive('paragraph') ? 'primary' : 'default'}
-              >
-                <TextFieldsIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="H1">
-              <IconButton
-                size="small"
-                onClick={() =>
-                  editor.chain().focus().toggleHeading({ level: 1 }).run()
-                }
-                color={
-                  editor.isActive('heading', { level: 1 })
-                    ? 'primary'
-                    : 'default'
-                }
-              >
-                <LooksOneIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="H2">
-              <IconButton
-                size="small"
-                onClick={() =>
-                  editor.chain().focus().toggleHeading({ level: 2 }).run()
-                }
-                color={
-                  editor.isActive('heading', { level: 2 })
-                    ? 'primary'
-                    : 'default'
-                }
-              >
-                <LooksTwoIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="H3">
-              <IconButton
-                size="small"
-                onClick={() =>
-                  editor.chain().focus().toggleHeading({ level: 3 }).run()
-                }
-                color={
-                  editor.isActive('heading', { level: 3 })
-                    ? 'primary'
-                    : 'default'
-                }
-              >
-                <Looks3Icon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Bold">
-              <IconButton
-                size="small"
-                onClick={() => editor.chain().focus().toggleBold().run()}
-                color={editor.isActive('bold') ? 'primary' : 'default'}
-              >
-                <FormatBoldIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Italic">
-              <IconButton
-                size="small"
-                onClick={() => editor.chain().focus().toggleItalic().run()}
-                color={editor.isActive('italic') ? 'primary' : 'default'}
-              >
-                <FormatItalicIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Bullet list">
-              <IconButton
-                size="small"
-                onClick={() => editor.chain().focus().toggleBulletList().run()}
-                color={editor.isActive('bulletList') ? 'primary' : 'default'}
-              >
-                <FormatListBulletedIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Ordered list">
-              <IconButton
-                size="small"
-                onClick={() => editor.chain().focus().toggleOrderedList().run()}
-                color={editor.isActive('orderedList') ? 'primary' : 'default'}
-              >
-                <FormatListNumberedIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            <Tooltip
-              title={editor.isActive('link') ? 'Remove link' : 'Add link'}
-            >
-              <IconButton
-                size="small"
-                onClick={() => {
-                  if (editor.isActive('link')) {
-                    editor.chain().focus().unsetLink().run()
-                  } else {
-                    setLinkUrl(editor.getAttributes('link').href || 'https://')
-                    setLinkInEdit(false)
-                    setLinkText('')
-                    setLinkDialogOpen(true)
-                  }
-                }}
-                color={editor.isActive('link') ? 'primary' : 'default'}
-              >
-                {editor.isActive('link') ? (
-                  <LinkOffIcon fontSize="small" />
-                ) : (
-                  <LinkIcon fontSize="small" />
-                )}
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Inline math">
-              <IconButton
-                size="small"
-                onClick={() => editMath('inline')}
-                color={editor.isActive('inlineMath') ? 'primary' : 'default'}
-              >
-                <SuperscriptIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Block math">
-              <IconButton
-                size="small"
-                onClick={() => editMath('block')}
-                color={editor.isActive('blockMath') ? 'primary' : 'default'}
-              >
-                <FunctionsIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Insert image">
-              <IconButton
-                size="small"
-                onClick={() => insertImage(editor, bookPath)}
-              >
-                <ImageIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Insert table">
-              <IconButton
-                size="small"
-                onClick={() =>
-                  editor
-                    ?.chain()
-                    .focus()
-                    .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
-                    .run()
-                }
-              >
-                <TableChartIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            <Box sx={{ flex: 1 }} />
-            <Tooltip title="Table of contents">
-              <IconButton
-                size="small"
-                onClick={() => setTocOpen(!tocOpen)}
-                color={tocOpen ? 'primary' : 'default'}
-              >
-                <ListIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          </>
-        )}
-      </Box>
+        onEditMath={(type) => editMath(type)}
+        onInsertImage={() => insertImage(editor, bookPath)}
+      />
       <EditorArea
         editor={editor}
         tocOpen={tocOpen}
         tocItems={tocItems}
         scrollContainerRef={scrollContainerRef}
       />
-      <Dialog
+      <LinkDialog
         open={linkDialogOpen}
         onClose={() => {
           savedScrollTopRef.current =
             scrollContainerRef.current?.scrollTop ?? null
           setLinkDialogOpen(false)
         }}
-        maxWidth="xs"
-        fullWidth
-        disableScrollLock
-      >
-        <DialogTitle
-          sx={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-          }}
-        >
-          {linkInEdit ? 'Edit Link' : 'Add Link'}
-          {linkInEdit && (
-            <Button
-              size="small"
-              onClick={() => {
-                shellOpen(linkUrl)
-              }}
-              sx={{ textTransform: 'none' }}
-            >
-              Open in Browser
-            </Button>
-          )}
-        </DialogTitle>
-        <DialogContent>
-          {linkInEdit && linkText && (
-            <TextField
-              margin="dense"
-              label="Text"
-              fullWidth
-              size="small"
-              value={linkText}
-              disabled
-              sx={{ mb: 1 }}
-            />
-          )}
-          <TextField
-            autoFocus
-            margin="dense"
-            label="URL"
-            fullWidth
-            value={linkUrl}
-            onChange={(e) => setLinkUrl(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                savedScrollTopRef.current =
-                  scrollContainerRef.current?.scrollTop ?? null
-                if (linkInEdit) handleLinkUpdate()
-                else handleLinkSubmit(editor, linkUrl, setLinkDialogOpen)
-              }
-            }}
-          />
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2, gap: 1 }}>
-          {linkInEdit && (
-            <Button
-              variant="outlined"
-              color="error"
-              onClick={() => {
-                savedScrollTopRef.current =
-                  scrollContainerRef.current?.scrollTop ?? null
-                try {
-                  if (!editor) return
-                  if (linkPos !== null && linkPos2 !== null) {
-                    const tr = editor.state.tr
-                    tr.removeMark(
-                      linkPos,
-                      linkPos2,
-                      editor.state.schema.marks.link,
-                    )
-                    editor.view.dispatch(tr)
-                  }
-                } catch (e) {
-                  console.error('Remove link failed:', e)
-                }
-                setLinkDialogOpen(false)
-              }}
-            >
-              Remove
-            </Button>
-          )}
-          <Box sx={{ flex: 1 }} />
-          <Button
-            onClick={() => {
-              savedScrollTopRef.current =
-                scrollContainerRef.current?.scrollTop ?? null
-              if (linkInEdit) handleLinkUpdate()
-              else handleLinkSubmit(editor, linkUrl, setLinkDialogOpen)
-            }}
-            variant="contained"
-          >
-            {linkInEdit ? 'Update' : 'Add Link'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-      <Dialog
+        url={linkUrl}
+        onUrlChange={setLinkUrl}
+        text={linkText}
+        isEdit={linkInEdit}
+        editor={editor}
+        onUpdate={() => {
+          savedScrollTopRef.current =
+            scrollContainerRef.current?.scrollTop ?? null
+          handleLinkUpdate()
+        }}
+        onRemove={() => {
+          savedScrollTopRef.current =
+            scrollContainerRef.current?.scrollTop ?? null
+          try {
+            if (!editor) return
+            if (linkPos !== null && linkPos2 !== null) {
+              const tr = editor.state.tr
+              tr.removeMark(linkPos, linkPos2, editor.state.schema.marks.link)
+              editor.view.dispatch(tr)
+            }
+          } catch (e) {
+            console.error('Remove link failed:', e)
+          }
+          setLinkDialogOpen(false)
+        }}
+      />
+      <MathDialog
         open={mathDialogOpen}
         onClose={() => setMathDialogOpen(false)}
-        maxWidth="sm"
-        fullWidth
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') {
-            e.preventDefault()
-            e.stopPropagation()
-          }
-        }}
-      >
-        <DialogTitle>
-          {mathTypeName === 'blockMath' ? 'Block Math' : 'Inline Math'}
-        </DialogTitle>
-        <DialogContent>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="LaTeX"
-            fullWidth
-            multiline={mathTypeName === 'blockMath'}
-            rows={mathTypeName === 'blockMath' ? 3 : 1}
-            value={mathLatex}
-            onChange={(e) => setMathLatex(e.target.value.replace(/\x1b/g, ''))}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                e.preventDefault()
-                e.stopPropagation()
-              }
-              if (e.key === 'Enter' && mathTypeName === 'inlineMath') {
-                e.preventDefault()
-                handleMathSubmit()
-              }
-            }}
-          />
-          <Box
-            sx={{
-              mt: 2,
-              p: 2,
-              bgcolor: 'grey.50',
-              borderRadius: 1,
-              textAlign: 'center',
-              minHeight: 60,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              overflow: 'auto',
-            }}
-          >
-            <MathPreview latex={mathLatex} />
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setMathDialogOpen(false)}>Cancel</Button>
-          <Button
-            onClick={handleMathSubmit}
-            variant="contained"
-            disabled={!mathLatex.trim()}
-          >
-            Update
-          </Button>
-        </DialogActions>
-      </Dialog>
+        latex={mathLatex}
+        onLatexChange={setMathLatex}
+        typeName={mathTypeName}
+        onSubmit={handleMathSubmit}
+      />
     </Box>
   )
 }

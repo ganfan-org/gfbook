@@ -286,9 +286,6 @@ pub fn new_book(title: String, app_handle: tauri::AppHandle, book_dir: Option<St
     fs::create_dir_all(&book_path)
         .map_err(|e| format!("Failed to create book directory: {}", e))?;
 
-    fs::create_dir_all(&book_path)
-        .map_err(|e| format!("Failed to create book directory: {}", e))?;
-
     let now = current_timestamp();
     let meta = BookMeta {
         title: title.clone(),
@@ -677,13 +674,33 @@ pub fn git_ahead_behind(book_path: String) -> Result<(u32, u32), String> {
 
 #[tauri::command]
 pub fn read_file_base64(path: String) -> Result<String, String> {
-    let data = fs::read(&path).map_err(|e| format!("Failed to read file: {}", e))?;
+    let p = PathBuf::from(&path);
+    let canonical = p
+        .canonicalize()
+        .map_err(|e| format!("Invalid path: {}", e))?;
+    let home = std::env::var("HOME")
+        .ok()
+        .map(PathBuf::from)
+        .ok_or_else(|| "Cannot determine home directory".to_string())?;
+    if !canonical.starts_with(&home) {
+        return Err("Access denied: path is outside home directory".to_string());
+    }
+    let data = fs::read(&canonical).map_err(|e| format!("Failed to read file: {}", e))?;
     Ok(base64_encode(&data))
 }
 
 #[tauri::command]
 pub fn read_image_as_data_url(book_path: String, rel_path: String) -> Result<String, String> {
+    let book_canonical = PathBuf::from(&book_path)
+        .canonicalize()
+        .map_err(|e| format!("Invalid book path: {}", e))?;
     let full_path = PathBuf::from(&book_path).join(&rel_path);
+    let canonical = full_path
+        .canonicalize()
+        .map_err(|e| format!("Invalid image path: {}", e))?;
+    if !canonical.starts_with(&book_canonical) {
+        return Err("Access denied: image path is outside book directory".to_string());
+    }
     let data = fs::read(&full_path).map_err(|e| format!("Failed to read image: {}", e))?;
     let ext = full_path
         .extension()

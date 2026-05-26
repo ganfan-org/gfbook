@@ -242,7 +242,9 @@ pub fn git_pull(book_path: &str) -> Result<String, String> {
     let repo = open_repo(book_path)?;
 
     // Auto-commit local changes first
-    let statuses = repo.statuses(None).unwrap();
+    let statuses = repo
+        .statuses(None)
+        .map_err(|e| format!("Failed to read git status: {}", e))?;
     if statuses.iter().any(|s| s.status() != git2::Status::CURRENT) {
         git_commit(book_path, "auto-save before pull")?;
     }

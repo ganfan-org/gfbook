@@ -20,7 +20,7 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: asset:; font-src 'self' data:; connect-src 'self' https: ipc: http://ipc.localhost; media-src 'self'",
       "assetProtocol": {
         "scope": {
           "allow": ["$HOME/**"]
