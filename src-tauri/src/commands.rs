@@ -241,6 +241,7 @@ pub fn set_books_dir(app_handle: tauri::AppHandle, dir: String) -> Result<String
     config["books_dir"] = serde_json::json!(dir);
     save_config(&app_handle, &config)?;
     fs::create_dir_all(&path).map_err(|e| format!("Failed to create directory: {}", e))?;
+    crate::logger::log_event(&app_handle, "set_books_dir", &format!("changed books directory to {}", dir));
     Ok("".to_string())
 }
 
@@ -309,6 +310,8 @@ pub fn new_book(title: String, app_handle: tauri::AppHandle, book_dir: Option<St
     let path_str = book_path.to_string_lossy().to_string();
     add_to_book_list(&app_handle, &path_str)?;
 
+    crate::logger::log_event(&app_handle, "create_book", &format!("created '{}'", title));
+
     Ok(BookInfo {
         title,
         path: path_str,
@@ -324,14 +327,18 @@ pub fn delete_book(book_path: String, app_handle: tauri::AppHandle) -> Result<()
     if path.exists() {
         fs::remove_dir_all(&path).map_err(|e| format!("Failed to delete book: {}", e))?;
     }
+    crate::logger::log_event(&app_handle, "delete_book", &format!("deleted '{}'", book_path));
     Ok(())
 }
 
 #[tauri::command]
-pub fn rename_book(book_path: String, new_title: String) -> Result<BookInfo, String> {
+pub fn rename_book(book_path: String, new_title: String, app_handle: tauri::AppHandle) -> Result<BookInfo, String> {
     let mut meta = load_meta(&book_path)?;
+    let old_title = meta.title.clone();
     meta.title = new_title;
     save_meta(&book_path, &meta)?;
+
+    crate::logger::log_event(&app_handle, "rename_book", &format!("renamed '{}' to '{}'", old_title, meta.title));
 
     let path_str = PathBuf::from(&book_path).to_string_lossy().to_string();
     Ok(BookInfo {
@@ -401,6 +408,7 @@ pub fn new_chapter(
     book_path: String,
     parent_id: Option<String>,
     title: String,
+    app_handle: tauri::AppHandle,
 ) -> Result<Chapter, String> {
     let now = current_timestamp();
     let id = Uuid::new_v4().to_string();
@@ -432,11 +440,13 @@ pub fn new_chapter(
         .map_err(|e| format!("Failed to create chapters dir: {}", e))?;
     fs::write(&file_path, &content).map_err(|e| format!("Failed to write chapter file: {}", e))?;
 
+    crate::logger::log_event(&app_handle, "create_chapter", &format!("created '{}'", title));
+
     Ok(chapter)
 }
 
 #[tauri::command]
-pub fn delete_chapter(book_path: String, chapter_id: String) -> Result<(), String> {
+pub fn delete_chapter(book_path: String, chapter_id: String, app_handle: tauri::AppHandle) -> Result<(), String> {
     let mut meta = load_meta(&book_path)?;
 
     let ids_to_delete = {
@@ -462,11 +472,13 @@ pub fn delete_chapter(book_path: String, chapter_id: String) -> Result<(), Strin
     remove_chapter_from_list(&mut meta.chapters, &chapter_id);
     save_meta(&book_path, &meta)?;
 
+    crate::logger::log_event(&app_handle, "delete_chapter", &format!("deleted chapter {}", chapter_id));
+
     Ok(())
 }
 
 #[tauri::command]
-pub fn rename_chapter(book_path: String, chapter_id: String, new_title: String) -> Result<(), String> {
+pub fn rename_chapter(book_path: String, chapter_id: String, new_title: String, app_handle: tauri::AppHandle) -> Result<(), String> {
     let mut meta = load_meta(&book_path)?;
     if let Some(chapter) = find_chapter_mut(&mut meta.chapters, &chapter_id) {
         chapter.title = new_title;
@@ -475,6 +487,7 @@ pub fn rename_chapter(book_path: String, chapter_id: String, new_title: String) 
         return Err("Chapter not found".to_string());
     }
     save_meta(&book_path, &meta)?;
+    crate::logger::log_event(&app_handle, "rename_chapter", &format!("renamed chapter {}", chapter_id));
     Ok(())
 }
 
@@ -615,14 +628,17 @@ pub fn git_remote_url(book_path: String) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-pub fn git_remote_set_url(book_path: String, url: String) -> Result<(), String> {
-    git::git_remote_set_url(&book_path, &url)
+pub fn git_remote_set_url(book_path: String, url: String, app_handle: tauri::AppHandle) -> Result<(), String> {
+    git::git_remote_set_url(&book_path, &url)?;
+    crate::logger::log_event(&app_handle, "set_remote_url", &format!("set remote url to {}", url));
+    Ok(())
 }
 
 fn run_git_and_emit<F>(app_handle: tauri::AppHandle, op_type: &'static str, f: F)
 where
     F: FnOnce() -> Result<String, String> + Send + 'static,
 {
+    crate::logger::log_event(&app_handle, op_type, "started");
     std::thread::spawn(move || {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             // Timeout after 30 seconds using a separate thread
@@ -632,18 +648,22 @@ where
             });
             match rx.recv_timeout(std::time::Duration::from_secs(30)) {
                 Ok(Ok(msg)) => {
+                    crate::logger::log_event(&app_handle, op_type, &format!("ok: {}", msg));
                     let _ = app_handle.emit("git:done", serde_json::json!({"type": op_type, "ok": true, "message": msg}));
                 }
                 Ok(Err(e)) => {
+                    crate::logger::log_event(&app_handle, op_type, &format!("failed: {}", e));
                     let _ = app_handle.emit("git:done", serde_json::json!({"type": op_type, "ok": false, "message": e}));
                 }
                 Err(_) => {
+                    crate::logger::log_event(&app_handle, op_type, "timed out (30s)");
                     let _ = app_handle.emit("git:done", serde_json::json!({"type": op_type, "ok": false, "message": "Operation timed out (30s)"}));
                 }
             }
             let _ = handle.join();
         }));
         if result.is_err() {
+            crate::logger::log_event(&app_handle, op_type, "crashed");
             let _ = app_handle.emit("git:done", serde_json::json!({"type": op_type, "ok": false, "message": "Internal error: operation crashed"}));
         }
     });
@@ -764,7 +784,7 @@ pub fn reveal_in_finder(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn download_image_url(book_path: String, url: String) -> Result<String, String> {
+pub fn download_image_url(book_path: String, url: String, app_handle: tauri::AppHandle) -> Result<String, String> {
     let assets_dir = PathBuf::from(&book_path).join("assets");
     fs::create_dir_all(&assets_dir)
         .map_err(|e| format!("Failed to create assets dir: {}", e))?;
@@ -804,11 +824,12 @@ pub fn download_image_url(book_path: String, url: String) -> Result<String, Stri
     let dest = assets_dir.join(&filename);
     fs::write(&dest, &bytes).map_err(|e| format!("Failed to write image: {}", e))?;
 
+    crate::logger::log_event(&app_handle, "download_image", &format!("downloaded from {}", url));
     Ok(format!("assets/{}", filename))
 }
 
 #[tauri::command]
-pub fn save_image_data(book_path: String, data_base64: String, ext: String) -> Result<String, String> {
+pub fn save_image_data(book_path: String, data_base64: String, ext: String, app_handle: tauri::AppHandle) -> Result<String, String> {
     let assets_dir = PathBuf::from(&book_path).join("assets");
     fs::create_dir_all(&assets_dir)
         .map_err(|e| format!("Failed to create assets dir: {}", e))?;
@@ -819,6 +840,7 @@ pub fn save_image_data(book_path: String, data_base64: String, ext: String) -> R
     let bytes = base64_decode(&data_base64)?;
     fs::write(&dest, &bytes).map_err(|e| format!("Failed to write image: {}", e))?;
 
+    crate::logger::log_event(&app_handle, "paste_image", &format!("saved pasted image {}", filename));
     Ok(format!("assets/{}", filename))
 }
 
@@ -851,7 +873,7 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
 }
 
 #[tauri::command]
-pub fn save_image_to_book(book_path: String, source_path: String) -> Result<String, String> {
+pub fn save_image_to_book(book_path: String, source_path: String, app_handle: tauri::AppHandle) -> Result<String, String> {
     let assets_dir = PathBuf::from(&book_path).join("assets");
     fs::create_dir_all(&assets_dir)
         .map_err(|e| format!("Failed to create assets dir: {}", e))?;
@@ -867,6 +889,7 @@ pub fn save_image_to_book(book_path: String, source_path: String) -> Result<Stri
     fs::copy(&source_path, &dest)
         .map_err(|e| format!("Failed to copy image: {}", e))?;
 
+    crate::logger::log_event(&app_handle, "import_image", &format!("imported image {}", filename));
     Ok(format!("assets/{}", filename))
 }
 
@@ -876,8 +899,10 @@ pub fn git_get_proxy(book_path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn git_set_proxy(book_path: String, proxy: String) -> Result<(), String> {
-    git::git_set_proxy(&book_path, &proxy)
+pub fn git_set_proxy(book_path: String, proxy: String, app_handle: tauri::AppHandle) -> Result<(), String> {
+    git::git_set_proxy(&book_path, &proxy)?;
+    crate::logger::log_event(&app_handle, "set_proxy", &format!("set proxy to {}", proxy));
+    Ok(())
 }
 
 #[tauri::command]
@@ -886,8 +911,10 @@ pub fn git_user_config(book_path: String) -> Result<(String, String), String> {
 }
 
 #[tauri::command]
-pub fn git_set_user_config(book_path: String, name: String, email: String) -> Result<(), String> {
-    git::git_set_user_config(&book_path, &name, &email)
+pub fn git_set_user_config(book_path: String, name: String, email: String, app_handle: tauri::AppHandle) -> Result<(), String> {
+    git::git_set_user_config(&book_path, &name, &email)?;
+    crate::logger::log_event(&app_handle, "set_git_config", &format!("set user: {} <{}>", name, email));
+    Ok(())
 }
 
 #[tauri::command]
@@ -899,10 +926,11 @@ pub fn get_global_git_user() -> Result<(String, String), String> {
 }
 
 #[tauri::command]
-pub fn set_global_git_user(name: String, email: String) -> Result<(), String> {
+pub fn set_global_git_user(name: String, email: String, app_handle: tauri::AppHandle) -> Result<(), String> {
     let mut config = git2::Config::open_default().map_err(|e| format!("Config error: {}", e))?;
     config.set_str("user.name", &name).map_err(|e| format!("Failed to set user.name: {}", e))?;
     config.set_str("user.email", &email).map_err(|e| format!("Failed to set user.email: {}", e))?;
+    crate::logger::log_event(&app_handle, "set_global_git_user", &format!("set git user: {} <{}>", name, email));
     Ok(())
 }
 
@@ -928,10 +956,45 @@ pub fn set_proxy_setting(app_handle: tauri::AppHandle, proxy: String) -> Result<
             let _ = git_cfg.set_str("http.proxy", &proxy);
         }
     }
-    save_config(&app_handle, &config)
+    save_config(&app_handle, &config)?;
+    crate::logger::log_event(&app_handle, "set_proxy_setting", &format!("proxy set to '{}'", if proxy.is_empty() { "none" } else { &proxy }));
+    Ok(())
 }
 
 #[tauri::command]
 pub fn git_list_conflicted(book_path: String) -> Result<Vec<String>, String> {
     git::git_list_conflicted(&book_path)
+}
+
+#[tauri::command]
+pub fn attempt_merge(
+    book_path: String,
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
+    run_git_and_emit(app_handle, "merge", move || {
+        let conflicted = git::git_attempt_merge(&book_path)?;
+        if conflicted.is_empty() {
+            Ok("Merged successfully.".to_string())
+        } else {
+            Ok(format!("conflicts:{}", conflicted.join(",")))
+        }
+    });
+    Ok("started".to_string())
+}
+
+#[tauri::command]
+pub fn resolve_conflict(
+    book_path: String,
+    file_path: String,
+    use_theirs: bool,
+) -> Result<String, String> {
+    git::git_resolve_conflict(&book_path, &file_path, use_theirs)
+}
+
+#[tauri::command]
+pub fn read_logs(
+    limit: usize,
+    app_handle: tauri::AppHandle,
+) -> Vec<serde_json::Value> {
+    crate::logger::read_logs(&app_handle, limit)
 }

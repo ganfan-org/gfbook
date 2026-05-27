@@ -318,6 +318,139 @@ pub fn git_list_conflicted(book_path: &str) -> Result<Vec<String>, String> {
     Ok(files)
 }
 
+pub fn git_attempt_merge(book_path: &str) -> Result<Vec<String>, String> {
+    // Fetch first
+    git_fetch(book_path)?;
+
+    let repo = open_repo(book_path)?;
+
+    let head = repo.head().map_err(|e| format!("No HEAD: {}", e))?;
+    let head_oid = head.target().ok_or_else(|| "No HEAD target".to_string())?;
+    let head_commit = repo
+        .find_commit(head_oid)
+        .map_err(|e| format!("HEAD commit: {}", e))?;
+
+    let fetch_head = repo
+        .find_reference("FETCH_HEAD")
+        .map_err(|e| format!("No FETCH_HEAD. Fetch first: {}", e))?;
+    let fetch_oid = fetch_head
+        .target()
+        .ok_or_else(|| "No FETCH_HEAD target".to_string())?;
+    let fetch_commit = repo
+        .find_commit(fetch_oid)
+        .map_err(|e| format!("FETCH_HEAD commit: {}", e))?;
+
+    let merge_base = repo
+        .merge_base(head_oid, fetch_oid)
+        .map_err(|_| "Local and remote have diverged.".to_string())?;
+
+    if merge_base == head_oid {
+        return Err(
+            "Already up to date or fast-forward possible. Pull first.".to_string(),
+        );
+    }
+
+    let mut index = repo
+        .index()
+        .map_err(|e| format!("Index error: {}", e))?;
+    let tree_oid = head_commit
+        .tree()
+        .map_err(|e| format!("Tree error: {}", e))?;
+    index
+        .read_tree(&tree_oid)
+        .map_err(|e| format!("Read tree error: {}", e))?;
+    index
+        .write()
+        .map_err(|e| format!("Index write error: {}", e))?;
+
+    let signature = repo
+        .signature()
+        .map_err(|e| format!("Signature error: {}", e))?;
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.force();
+
+    repo.merge_commits(&head_commit, &fetch_commit, None)
+        .map_err(|e| format!("Merge failed: {}", e))?;
+
+    repo.checkout_index(None, Some(&mut checkout))
+        .map_err(|e| format!("Checkout after merge: {}", e))?;
+
+    let conflicted = git_list_conflicted(book_path)?;
+
+    if conflicted.is_empty() {
+        // Clean merge - commit it
+        let mut index = repo
+            .index()
+            .map_err(|e| format!("Index error: {}", e))?;
+        let tree_oid = index
+            .write_tree()
+            .map_err(|e| format!("Write tree: {}", e))?;
+        let tree = repo
+            .find_tree(tree_oid)
+            .map_err(|e| format!("Find tree: {}", e))?;
+        let msg = format!("merge: Merge remote changes");
+        repo.commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            &msg,
+            &tree,
+            &[&head_commit, &fetch_commit],
+        )
+        .map_err(|e| format!("Commit merge: {}", e))?;
+        repo.cleanup_state()
+            .map_err(|e| format!("Cleanup: {}", e))?;
+        Ok(vec![])
+    } else {
+        Ok(conflicted)
+    }
+}
+
+pub fn git_resolve_conflict(
+    book_path: &str,
+    file_path: &str,
+    use_theirs: bool,
+) -> Result<String, String> {
+    let repo = open_repo(book_path)?;
+    let mut index = repo
+        .index()
+        .map_err(|e| format!("Index error: {}", e))?;
+
+    let target_stage: u16 = if use_theirs { 3 } else { 2 };
+    let chosen_entry = index
+        .iter()
+        .find(|e| {
+            let stage = (e.flags >> 12) & 3;
+            stage == target_stage && e.path == file_path.as_bytes()
+        })
+        .ok_or_else(|| "No matching stage entry found".to_string())?;
+
+    let content = repo
+        .find_blob(chosen_entry.id)
+        .map_err(|e| format!("Blob error: {}", e))?
+        .content()
+        .to_vec();
+
+    let work_path = repo
+        .workdir()
+        .ok_or_else(|| "No working directory".to_string())?
+        .join(file_path);
+    if let Some(parent) = work_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Dir error: {}", e))?;
+    }
+    std::fs::write(&work_path, &content).map_err(|e| format!("Write error: {}", e))?;
+
+    index
+        .add_path(std::path::Path::new(file_path))
+        .map_err(|e| format!("Index add error: {}", e))?;
+    index
+        .write()
+        .map_err(|e| format!("Index write error: {}", e))?;
+
+    Ok(format!("Resolved: {}", file_path))
+}
+
 pub fn git_push(book_path: &str) -> Result<String, String> {
     let repo = open_repo(book_path)?;
     let mut remote = repo

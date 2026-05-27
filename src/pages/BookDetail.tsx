@@ -1,6 +1,8 @@
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import SettingsIcon from '@mui/icons-material/Settings';
-import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
+import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
+import SettingsIcon from '@mui/icons-material/Settings'
+import FolderOpenIcon from '@mui/icons-material/FolderOpen'
 import {
   Box,
   Drawer,
@@ -14,19 +16,26 @@ import {
   Button,
   TextField,
   Tooltip,
-} from '@mui/material';
-import { listen } from '@tauri-apps/api/event';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+} from '@mui/material'
+import { listen } from '@tauri-apps/api/event'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import ChapterEditor from '../components/ChapterEditor';
-import ChapterTree from '../components/ChapterTree';
-import { useBook } from '../hooks/useBook';
-import { revealInFinder } from '../utils/commands';
-import type { Chapter } from '../types';
+import ChapterEditor from '../components/ChapterEditor'
+import ChapterTree from '../components/ChapterTree'
+import { useBook } from '../hooks/useBook'
+import {
+  revealInFinder,
+  gitListConflicted,
+  resolveConflict,
+  attemptMerge,
+  readLogs,
+} from '../utils/commands'
+import type { LogEntry } from '../utils/commands'
+import type { Chapter } from '../types'
 
 interface BookDetailProps {
-  bookPath: string;
-  onBack: () => void;
+  bookPath: string
+  onBack: () => void
 }
 
 export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
@@ -46,180 +55,317 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
     commit,
     autoCommit,
     getRemoteUrl,
-    setRemoteUrl:     setRemoteUrlApi,
+    setRemoteUrl: setRemoteUrlApi,
     fetchRemote,
     pullRemote,
     pushRemote,
     getAheadBehind,
     getUserConfig,
     refreshGitStatus,
-  } = useBook(bookPath);
+  } = useBook(bookPath)
 
-  const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const [addParentId, setAddParentId] = useState<string | null>(null);
-  const [addTitle, setAddTitle] = useState('');
-  const [commitDialogOpen, setCommitDialogOpen] = useState(false);
-  const [commitMessage, setCommitMessage] = useState('');
-  const [remoteUrlState, setRemoteUrlState] = useState('');
-  const [syncingType, setSyncingType] = useState<string | null>(null);
-  const [remoteUrlDraft, setRemoteUrlDraft] = useState('');
-  const [syncOutput, setSyncOutput] = useState('');
-  const [gitName, setGitName] = useState('');
-  const [gitEmail, setGitEmail] = useState('');
-  const [drawerWidth, setDrawerWidth] = useState(280);
-  const resizingRef = useRef(false);
+  const [addDialogOpen, setAddDialogOpen] = useState(false)
+  const [addParentId, setAddParentId] = useState<string | null>(null)
+  const [addTitle, setAddTitle] = useState('')
+  const [commitDialogOpen, setCommitDialogOpen] = useState(false)
+  const [commitMessage, setCommitMessage] = useState('')
+  const [remoteUrlState, setRemoteUrlState] = useState('')
+  const [syncingType, setSyncingType] = useState<string | null>(null)
+  const [remoteUrlDraft, setRemoteUrlDraft] = useState('')
+  const [syncOutput, setSyncOutput] = useState('')
+  const [gitName, setGitName] = useState('')
+  const [gitEmail, setGitEmail] = useState('')
+  const [drawerWidth, setDrawerWidth] = useState(280)
+  const resizingRef = useRef(false)
+  const [aheadBehind, setAheadBehind] = useState<[number, number] | null>(null)
+  const [conflictedFiles, setConflictedFiles] = useState<string[]>([])
+  const [resolvedFiles, setResolvedFiles] = useState<Set<string>>(new Set())
+  const [mergeInProgress, setMergeInProgress] = useState(false)
+  const [logs, setLogs] = useState<LogEntry[]>([])
+  const [showLogs, setShowLogs] = useState(false)
 
-  const handleResizeStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    resizingRef.current = true;
-    const startX = e.clientX;
-    const startWidth = drawerWidth;
+  const refreshLogs = useCallback(async () => {
+    try {
+      const entries = await readLogs(100)
+      setLogs(entries.reverse())
+    } catch {
+      /* ignore */
+    }
+  }, [])
 
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!resizingRef.current) return;
-      const newWidth = Math.max(180, Math.min(500, startWidth + ev.clientX - startX));
-      setDrawerWidth(newWidth);
-    };
+  const refreshAheadBehind = useCallback(async () => {
+    if (!bookPath) return
+    try {
+      const ab = await getAheadBehind()
+      setAheadBehind(ab)
+    } catch {
+      setAheadBehind(null)
+    }
+  }, [bookPath, getAheadBehind])
 
-    const onMouseUp = () => {
-      resizingRef.current = false;
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-    };
+  const handleAttemptMerge = useCallback(async () => {
+    if (!bookPath) return
+    setMergeInProgress(true)
+    setSyncingType('merge')
+    setSyncOutput('')
+    try {
+      await attemptMerge(bookPath)
+    } catch (e) {
+      setSyncOutput(String(e))
+      setMergeInProgress(false)
+      setSyncingType(null)
+    }
+  }, [bookPath])
 
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-  }, [drawerWidth]);
+  const handleResolveFile = useCallback(
+    async (filePath: string, useTheirs: boolean) => {
+      if (!bookPath) return
+      try {
+        await resolveConflict(bookPath, filePath, useTheirs)
+        setResolvedFiles((prev) => new Set([...prev, filePath]))
+      } catch (e) {
+        setSyncOutput(`Failed to resolve ${filePath}: ${e}`)
+      }
+    },
+    [bookPath],
+  )
 
+  const handleCommitMerge = useCallback(async () => {
+    if (!bookPath) return
+    try {
+      await commit('Merge remote changes')
+      setConflictedFiles([])
+      setResolvedFiles(new Set())
+      setSyncOutput('Merge committed.')
+      refreshGitStatus()
+      refreshAheadBehind()
+    } catch (e) {
+      setSyncOutput(String(e))
+    }
+  }, [bookPath, commit, refreshGitStatus, refreshAheadBehind])
 
+  const handleResizeStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault()
+      resizingRef.current = true
+      const startX = e.clientX
+      const startWidth = drawerWidth
+
+      const onMouseMove = (ev: MouseEvent) => {
+        if (!resizingRef.current) return
+        const newWidth = Math.max(
+          180,
+          Math.min(500, startWidth + ev.clientX - startX),
+        )
+        setDrawerWidth(newWidth)
+      }
+
+      const onMouseUp = () => {
+        resizingRef.current = false
+        window.removeEventListener('mousemove', onMouseMove)
+        window.removeEventListener('mouseup', onMouseUp)
+      }
+
+      window.addEventListener('mousemove', onMouseMove)
+      window.addEventListener('mouseup', onMouseUp)
+    },
+    [drawerWidth],
+  )
 
   // Auto-commit every 10 minutes
   useEffect(() => {
-    const id = setInterval(() => {
-      autoCommit('auto-save');
-    }, 10 * 60 * 1000);
-    return () => clearInterval(id);
-  }, [autoCommit]);
+    const id = setInterval(
+      () => {
+        autoCommit('auto-save')
+      },
+      10 * 60 * 1000,
+    )
+    return () => clearInterval(id)
+  }, [autoCommit])
 
   // Auto-commit on chapter switch
-  const prevChapterRef = useRef(selectedChapterId);
+  const prevChapterRef = useRef(selectedChapterId)
   useEffect(() => {
-    if (prevChapterRef.current && prevChapterRef.current !== selectedChapterId) {
-      autoCommit('auto-save before switch');
+    if (
+      prevChapterRef.current &&
+      prevChapterRef.current !== selectedChapterId
+    ) {
+      autoCommit('auto-save before switch')
     }
-    prevChapterRef.current = selectedChapterId;
-  }, [selectedChapterId, autoCommit]);
+    prevChapterRef.current = selectedChapterId
+  }, [selectedChapterId, autoCommit])
 
   // Auto-commit on unmount (app close / back to shelf)
   useEffect(() => {
-    return () => { autoCommit('auto-save'); };
-  }, [autoCommit]);
+    return () => {
+      autoCommit('auto-save')
+    }
+  }, [autoCommit])
 
   // Listen for async git operation results
   useEffect(() => {
-    const unlisten = listen<{ type: string; ok: boolean; message: string }>('git:done', (event) => {
-      setSyncingType(null);
-      setSyncOutput(event.payload.message);
-      if (event.payload.ok) {
-        refreshGitStatus();
-      }
-    });
-    return () => { unlisten.then((fn) => fn()); };
-  }, [refreshGitStatus]);
+    const unlisten = listen<{ type: string; ok: boolean; message: string }>(
+      'git:done',
+      async (event) => {
+        setSyncingType(null)
+        if (event.payload.type === 'merge') {
+          setMergeInProgress(false)
+          if (event.payload.ok) {
+            const msg = event.payload.message
+            if (msg.startsWith('conflicts:')) {
+              const files = msg.replace('conflicts:', '').split(',')
+              setConflictedFiles(files)
+              setResolvedFiles(new Set())
+              setSyncOutput('Merge conflict detected. Resolve each file below.')
+            } else {
+              setConflictedFiles([])
+              setSyncOutput(msg)
+              refreshGitStatus()
+              refreshAheadBehind()
+            }
+          } else {
+            setSyncOutput(event.payload.message)
+          }
+        } else {
+          setSyncOutput(event.payload.message)
+          if (event.payload.ok) {
+            refreshGitStatus()
+            refreshAheadBehind()
+          }
+        }
+      },
+    )
+    return () => {
+      unlisten.then((fn) => fn())
+    }
+  }, [refreshGitStatus, refreshAheadBehind])
+
+  // Refresh ahead/behind on mount
+  useEffect(() => {
+    refreshAheadBehind()
+  }, [refreshAheadBehind])
 
   const selectedChapter = useMemo(() => {
-    if (!meta || !selectedChapterId) return null;
+    if (!meta || !selectedChapterId) return null
     const find = (chapters: Chapter[]): Chapter | null => {
       for (const ch of chapters) {
-        if (ch.id === selectedChapterId) return ch;
-        const found = find(ch.chapters);
-        if (found) return found;
+        if (ch.id === selectedChapterId) return ch
+        const found = find(ch.chapters)
+        if (found) return found
       }
-      return null;
-    };
-    return find(meta.chapters);
-  }, [meta, selectedChapterId]);
+      return null
+    }
+    return find(meta.chapters)
+  }, [meta, selectedChapterId])
 
   const handleAddChapter = useCallback((parentId: string | null) => {
-    setAddParentId(parentId);
-    setAddTitle('');
-    setAddDialogOpen(true);
-  }, []);
+    setAddParentId(parentId)
+    setAddTitle('')
+    setAddDialogOpen(true)
+  }, [])
 
   const handleCreateChapter = async () => {
-    if (!addTitle.trim()) return;
+    if (!addTitle.trim()) return
     try {
-      const chapter = await createChapter(addParentId, addTitle.trim());
-      setAddDialogOpen(false);
-      setAddTitle('');
-      selectChapter(chapter.id);
+      const chapter = await createChapter(addParentId, addTitle.trim())
+      setAddDialogOpen(false)
+      setAddTitle('')
+      selectChapter(chapter.id)
     } catch (e) {
-      console.error('Failed to create chapter:', e);
+      console.error('Failed to create chapter:', e)
     }
-  };
+  }
 
   const handleSaveContent = useCallback(
     async (markdown: string) => {
-      if (!selectedChapterId) return;
+      if (!selectedChapterId) return
       try {
-        await saveChapter(selectedChapterId, markdown);
+        await saveChapter(selectedChapterId, markdown)
       } catch (e) {
-        console.error('Failed to save chapter:', e);
+        console.error('Failed to save chapter:', e)
       }
     },
     [selectedChapterId, saveChapter],
-  );
+  )
 
   const handleDeleteChapter = useCallback(
     async (id: string) => {
       try {
-        await removeChapter(id);
+        await removeChapter(id)
       } catch (e) {
-        console.error('Failed to delete chapter:', e);
+        console.error('Failed to delete chapter:', e)
       }
     },
     [removeChapter],
-  );
+  )
 
   const handleRenameChapter = useCallback(
     async (id: string, title: string) => {
       try {
-        await renameChapterById(id, title);
+        await renameChapterById(id, title)
       } catch (e) {
-        console.error('Failed to rename chapter:', e);
+        console.error('Failed to rename chapter:', e)
       }
     },
     [renameChapterById],
-  );
+  )
 
   const handleCommit = useCallback(async () => {
-    if (!commitMessage.trim()) return;
+    if (!commitMessage.trim()) return
     try {
-      await commit(commitMessage.trim());
-      setCommitDialogOpen(false);
-      setCommitMessage('');
+      await commit(commitMessage.trim())
+      setCommitDialogOpen(false)
+      setCommitMessage('')
     } catch (e) {
-      console.error('Failed to commit:', e);
+      console.error('Failed to commit:', e)
     }
-  }, [commitMessage, commit]);
+  }, [commitMessage, commit])
 
   const handleMoveChapter = useCallback(
-    async (chapterId: string, targetId: string | null, position: 'inner' | 'before' | 'after') => {
-      console.log('[BookDetail] handleMoveChapter:', { chapterId, targetId, position });
+    async (
+      chapterId: string,
+      targetId: string | null,
+      position: 'inner' | 'before' | 'after',
+    ) => {
+      console.log('[BookDetail] handleMoveChapter:', {
+        chapterId,
+        targetId,
+        position,
+      })
       try {
-        await moveChapterTo(chapterId, targetId, position);
-        console.log('[BookDetail] moveChapterTo succeeded');
+        await moveChapterTo(chapterId, targetId, position)
+        console.log('[BookDetail] moveChapterTo succeeded')
       } catch (e) {
-        console.error('[BookDetail] moveChapterTo failed:', e);
+        console.error('[BookDetail] moveChapterTo failed:', e)
       }
     },
     [moveChapterTo],
-  );
+  )
 
   return (
     <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      <Box sx={{ width: drawerWidth, minWidth: 180, maxWidth: 500, flexShrink: 0, overflow: 'hidden', display: 'flex' }}>
-        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', bgcolor: (t) => t.palette.mode === 'dark' ? 'grey.900' : 'grey.50', borderRight: 1, borderColor: 'divider', minWidth: 0 }}>
+      <Box
+        sx={{
+          width: drawerWidth,
+          minWidth: 180,
+          maxWidth: 500,
+          flexShrink: 0,
+          overflow: 'hidden',
+          display: 'flex',
+        }}
+      >
+        <Box
+          sx={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            bgcolor: (t) =>
+              t.palette.mode === 'dark' ? 'grey.900' : 'grey.50',
+            borderRight: 1,
+            borderColor: 'divider',
+            minWidth: 0,
+          }}
+        >
           <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
             <IconButton onClick={onBack} size="small">
               <ArrowBackIcon />
@@ -246,23 +392,86 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
           </Box>
           <Box
             onClick={async () => {
-              setCommitMessage('');
-              setSyncOutput('');
-              const url = await getRemoteUrl();
-              setRemoteUrlState(url || '');
-              setRemoteUrlDraft(url || '');
-              const [name, email] = await getUserConfig();
-              setGitName(name);
-              setGitEmail(email);
-              setCommitDialogOpen(true);
+              setCommitMessage('')
+              setSyncOutput('')
+              const url = await getRemoteUrl()
+              setRemoteUrlState(url || '')
+              setRemoteUrlDraft(url || '')
+              const [name, email] = await getUserConfig()
+              setGitName(name)
+              setGitEmail(email)
+              setCommitDialogOpen(true)
             }}
-            sx={{ p: 1, borderTop: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 0.5, cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
+            sx={{
+              p: 1,
+              borderTop: 1,
+              borderColor: 'divider',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 0.5,
+              cursor: 'pointer',
+              '&:hover': { bgcolor: 'action.hover' },
+            }}
           >
-            <Box sx={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, bgcolor: gitStatusText ? 'warning.main' : 'success.main' }} />
-            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', flex: 1 }}>
-              {gitStatusText ? 'dirty' : 'clean'}
+            <Box
+              sx={{
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                flexShrink: 0,
+                bgcolor: gitStatusText ? 'warning.main' : 'success.main',
+              }}
+            />
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{
+                fontSize: '0.7rem',
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0.5,
+              }}
+            >
+              {aheadBehind != null && aheadBehind[0] > 0 && (
+                <Box
+                  component="span"
+                  sx={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 0.2,
+                    color: 'warning.main',
+                  }}
+                >
+                  <ArrowUpwardIcon sx={{ fontSize: 12 }} />
+                  {aheadBehind[0]}
+                </Box>
+              )}
+              {aheadBehind != null && aheadBehind[1] > 0 && (
+                <Box
+                  component="span"
+                  sx={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 0.2,
+                    color: 'info.main',
+                  }}
+                >
+                  <ArrowDownwardIcon sx={{ fontSize: 12 }} />
+                  {aheadBehind[1]}
+                </Box>
+              )}
+              {!gitStatusText &&
+              aheadBehind?.[0] === 0 &&
+              aheadBehind?.[1] === 0
+                ? 'synced'
+                : gitStatusText
+                  ? 'dirty'
+                  : ''}
             </Typography>
-            <SettingsIcon sx={{ fontSize: 16, color: 'text.secondary', opacity: 0.6 }} />
+            <SettingsIcon
+              sx={{ fontSize: 16, color: 'text.secondary', opacity: 0.6 }}
+            />
           </Box>
         </Box>
         {/* Drag handle */}
@@ -284,7 +493,14 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
         />
       </Box>
 
-      <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <Box
+        sx={{
+          flex: 1,
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
         {selectedChapter ? (
           <ChapterEditor
             key={selectedChapter.id}
@@ -302,29 +518,66 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
               color: 'text.secondary',
             }}
           >
-            <Typography variant="h6">Select a chapter from the sidebar to start editing</Typography>
+            <Typography variant="h6">
+              Select a chapter from the sidebar to start editing
+            </Typography>
           </Box>
         )}
       </Box>
 
-      <Dialog open={commitDialogOpen} onClose={() => {
-        setCommitDialogOpen(false);
-        setSyncOutput('');
-      }} maxWidth="sm" fullWidth>
+      <Dialog
+        open={commitDialogOpen}
+        onClose={() => {
+          setCommitDialogOpen(false)
+          setSyncOutput('')
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
         <DialogTitle>Settings</DialogTitle>
         <DialogContent>
-          <Typography variant="subtitle2" gutterBottom>Storage</Typography>
-          <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.8rem', wordBreak: 'break-all', mb: 1 }}>
+          <Typography variant="subtitle2" gutterBottom>
+            Storage
+          </Typography>
+          <Typography
+            variant="body2"
+            sx={{
+              fontFamily: 'monospace',
+              fontSize: '0.8rem',
+              wordBreak: 'break-all',
+              mb: 1,
+            }}
+          >
             {bookPath}
           </Typography>
-          <Button size="small" startIcon={<FolderOpenIcon />} variant="outlined" onClick={() => revealInFinder(bookPath)}>
-            {navigator.platform.includes('Win') ? 'Show in Explorer' : navigator.platform.includes('Mac') ? 'Reveal in Finder' : 'Open Folder'}
+          <Button
+            size="small"
+            startIcon={<FolderOpenIcon />}
+            variant="outlined"
+            onClick={() => revealInFinder(bookPath)}
+          >
+            {navigator.platform.includes('Win')
+              ? 'Show in Explorer'
+              : navigator.platform.includes('Mac')
+                ? 'Reveal in Finder'
+                : 'Open Folder'}
           </Button>
 
           <Divider sx={{ my: 2 }} />
 
-          <Typography variant="subtitle2" gutterBottom>Git Changes</Typography>
-          <Typography variant="body2" color="text.secondary" mb={2} sx={{ fontFamily: 'monospace', fontSize: '0.8rem', whiteSpace: 'pre-wrap' }}>
+          <Typography variant="subtitle2" gutterBottom>
+            Git Changes
+          </Typography>
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            mb={2}
+            sx={{
+              fontFamily: 'monospace',
+              fontSize: '0.8rem',
+              whiteSpace: 'pre-wrap',
+            }}
+          >
             {gitStatusText || 'No changes'}
           </Typography>
 
@@ -341,12 +594,17 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
                 onChange={(e) => setCommitMessage(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                    handleCommit();
+                    handleCommit()
                   }
                 }}
               />
               <Box textAlign="right" mt={1} mb={2}>
-                <Button onClick={handleCommit} variant="contained" size="small" disabled={!commitMessage.trim()}>
+                <Button
+                  onClick={handleCommit}
+                  variant="contained"
+                  size="small"
+                  disabled={!commitMessage.trim()}
+                >
                   Commit
                 </Button>
               </Box>
@@ -355,9 +613,20 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
 
           <Divider sx={{ my: 2 }} />
 
-          <Typography variant="subtitle2" gutterBottom>Remote</Typography>
+          <Typography variant="subtitle2" gutterBottom>
+            Remote
+          </Typography>
           {remoteUrlState && (
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5, fontFamily: 'monospace', fontSize: '0.75rem' }}>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{
+                display: 'block',
+                mb: 0.5,
+                fontFamily: 'monospace',
+                fontSize: '0.75rem',
+              }}
+            >
               current: {remoteUrlState}
             </Typography>
           )}
@@ -370,43 +639,187 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
             sx={{ mb: 1 }}
           />
           <Box display="flex" gap={1} mb={1}>
-            <Button size="small" variant="outlined" onClick={async () => {
-              try {
-                const url = await getRemoteUrl();
-                setRemoteUrlState(url || '');
-                setRemoteUrlDraft(url || '');
-              } catch { /* ignore */ }
-            }}>Load</Button>
-            <Button size="small" variant="outlined" onClick={async () => {
-              try {
-                await setRemoteUrlApi(remoteUrlDraft);
-                setRemoteUrlState(remoteUrlDraft);
-              } catch (e) { console.error(e); }
-            }}>Set URL</Button>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={async () => {
+                try {
+                  const url = await getRemoteUrl()
+                  setRemoteUrlState(url || '')
+                  setRemoteUrlDraft(url || '')
+                } catch {
+                  /* ignore */
+                }
+              }}
+            >
+              Load
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={async () => {
+                try {
+                  await setRemoteUrlApi(remoteUrlDraft)
+                  setRemoteUrlState(remoteUrlDraft)
+                } catch (e) {
+                  console.error(e)
+                }
+              }}
+            >
+              Set URL
+            </Button>
           </Box>
 
           <Box display="flex" gap={1} mb={1}>
-            <Button size="small" variant="outlined" disabled={!!syncingType} onClick={async () => {
-              setSyncingType('fetch'); setSyncOutput('');
-              await fetchRemote();
-            }}>{syncingType === 'fetch' ? 'Fetching...' : 'Fetch'}</Button>
-            <Button size="small" variant="outlined" disabled={!!syncingType} onClick={async () => {
-              setSyncingType('pull'); setSyncOutput('');
-              await pullRemote();
-            }}>{syncingType === 'pull' ? 'Pulling...' : 'Pull'}</Button>
-            <Button size="small" variant="outlined" disabled={!!syncingType} onClick={async () => {
-              setSyncingType('push'); setSyncOutput('');
-              await pushRemote();
-            }}>{syncingType === 'push' ? 'Pushing...' : 'Push'}</Button>
+            <Button
+              size="small"
+              variant="outlined"
+              disabled={!!syncingType}
+              onClick={async () => {
+                setSyncingType('fetch')
+                setSyncOutput('')
+                await fetchRemote()
+              }}
+            >
+              {syncingType === 'fetch' ? 'Fetching...' : 'Fetch'}
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              disabled={!!syncingType}
+              onClick={async () => {
+                setSyncingType('pull')
+                setSyncOutput('')
+                await pullRemote()
+              }}
+            >
+              {syncingType === 'pull' ? 'Pulling...' : 'Pull'}
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              disabled={!!syncingType}
+              onClick={async () => {
+                setSyncingType('push')
+                setSyncOutput('')
+                await pushRemote()
+              }}
+            >
+              {syncingType === 'push' ? 'Pushing...' : 'Push'}
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              color="warning"
+              disabled={!!syncingType || mergeInProgress}
+              onClick={handleAttemptMerge}
+            >
+              {mergeInProgress ? 'Merging...' : 'Merge'}
+            </Button>
           </Box>
 
-          <Box sx={{ bgcolor: 'grey.900', color: '#a8d85a', p: 1.5, borderRadius: 1, mt: 2, minHeight: 60, maxHeight: 150, overflow: 'auto', fontFamily: 'monospace', fontSize: '0.75rem', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+          {conflictedFiles.length > 0 && (
+            <Box mt={1} mb={1}>
+              <Divider sx={{ my: 1 }} />
+              <Typography variant="subtitle2" color="error" gutterBottom>
+                ⚠ Conflicted Files
+              </Typography>
+              {conflictedFiles.map((file) => (
+                <Box
+                  key={file}
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                    py: 0.5,
+                  }}
+                >
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      flex: 1,
+                      fontFamily: 'monospace',
+                      fontSize: '0.7rem',
+                      wordBreak: 'break-all',
+                    }}
+                  >
+                    {resolvedFiles.has(file) ? '✅ ' : ''}
+                    {file}
+                  </Typography>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="success"
+                    sx={{ fontSize: '0.65rem', minWidth: 80 }}
+                    onClick={() => handleResolveFile(file, true)}
+                    disabled={resolvedFiles.has(file)}
+                  >
+                    Keep Remote
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="warning"
+                    sx={{ fontSize: '0.65rem', minWidth: 80 }}
+                    onClick={() => handleResolveFile(file, false)}
+                    disabled={resolvedFiles.has(file)}
+                  >
+                    Keep Local
+                  </Button>
+                </Box>
+              ))}
+              {conflictedFiles.every((f) => resolvedFiles.has(f)) && (
+                <Button
+                  size="small"
+                  variant="contained"
+                  sx={{ mt: 1 }}
+                  onClick={handleCommitMerge}
+                >
+                  Commit Merge
+                </Button>
+              )}
+            </Box>
+          )}
+
+          <Box
+            sx={{
+              bgcolor: 'grey.900',
+              color: '#a8d85a',
+              p: 1.5,
+              borderRadius: 1,
+              mt: 2,
+              minHeight: 60,
+              maxHeight: 150,
+              overflow: 'auto',
+              fontFamily: 'monospace',
+              fontSize: '0.75rem',
+              whiteSpace: 'pre-wrap',
+              lineHeight: 1.5,
+            }}
+          >
             {syncingType ? (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Box sx={{ width: 12, height: 12, border: '2px solid #a8d85a', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }}>
+                <Box
+                  sx={{
+                    width: 12,
+                    height: 12,
+                    border: '2px solid #a8d85a',
+                    borderTopColor: 'transparent',
+                    borderRadius: '50%',
+                    animation: 'spin 0.6s linear infinite',
+                  }}
+                >
                   <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
                 </Box>
-                <span>{syncingType === 'fetch' ? 'Fetching...' : syncingType === 'pull' ? 'Pulling...' : 'Pushing...'}</span>
+                <span>
+                  {syncingType === 'fetch'
+                    ? 'Fetching...'
+                    : syncingType === 'pull'
+                      ? 'Pulling...'
+                      : syncingType === 'push'
+                        ? 'Pushing...'
+                        : 'Merging...'}
+                </span>
               </Box>
             ) : syncOutput ? (
               syncOutput
@@ -414,13 +827,70 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
               <span style={{ color: '#666' }}>Ready</span>
             )}
           </Box>
+
+          <Divider sx={{ my: 2 }} />
+
+          <Box display="flex" alignItems="center" gap={1}>
+            <Button
+              size="small"
+              onClick={() => {
+                setShowLogs(!showLogs)
+                if (!showLogs) refreshLogs()
+              }}
+            >
+              {showLogs ? 'Hide Log' : 'Show Log'}
+            </Button>
+          </Box>
+
+          {showLogs && (
+            <Box
+              sx={{
+                mt: 1,
+                bgcolor: 'grey.900',
+                color: '#a8d85a',
+                p: 1.5,
+                borderRadius: 1,
+                maxHeight: 200,
+                overflow: 'auto',
+                fontFamily: 'monospace',
+                fontSize: '0.7rem',
+                whiteSpace: 'pre-wrap',
+                lineHeight: 1.5,
+              }}
+            >
+              {logs.length === 0 ? (
+                <span style={{ color: '#666' }}>No logs</span>
+              ) : (
+                logs.map((entry, i) => (
+                  <Box key={i} sx={{ mb: 0.3 }}>
+                    <span style={{ color: '#888' }}>
+                      {new Date(entry.t).toLocaleTimeString()}{' '}
+                    </span>
+                    <span style={{ color: '#fff' }}>[{entry.e}]</span> {entry.d}
+                  </Box>
+                ))
+              )}
+            </Box>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => { setCommitDialogOpen(false); setSyncOutput(''); }}>Close</Button>
+          <Button
+            onClick={() => {
+              setCommitDialogOpen(false)
+              setSyncOutput('')
+            }}
+          >
+            Close
+          </Button>
         </DialogActions>
       </Dialog>
 
-      <Dialog open={addDialogOpen} onClose={() => setAddDialogOpen(false)} maxWidth="xs" fullWidth>
+      <Dialog
+        open={addDialogOpen}
+        onClose={() => setAddDialogOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
         <DialogTitle>New Chapter</DialogTitle>
         <DialogContent>
           <TextField
@@ -435,11 +905,15 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setAddDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleCreateChapter} variant="contained" disabled={!addTitle.trim()}>
+          <Button
+            onClick={handleCreateChapter}
+            variant="contained"
+            disabled={!addTitle.trim()}
+          >
             Create
           </Button>
         </DialogActions>
       </Dialog>
     </Box>
-  );
+  )
 }

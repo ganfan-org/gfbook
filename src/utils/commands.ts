@@ -177,6 +177,18 @@ export function gitListConflicted(bookPath: string): Promise<string[]> {
   return invoke('git_list_conflicted', { bookPath })
 }
 
+export function attemptMerge(bookPath: string): Promise<string> {
+  return invoke('attempt_merge', { bookPath })
+}
+
+export function resolveConflict(
+  bookPath: string,
+  filePath: string,
+  useTheirs: boolean,
+): Promise<string> {
+  return invoke('resolve_conflict', { bookPath, filePath, useTheirs })
+}
+
 export function revealInFinder(path: string): Promise<void> {
   return invoke('reveal_in_finder', { path })
 }
@@ -205,4 +217,14 @@ export async function getAssetUrl(
     relPath,
   })) as string
   return convertFileSrc(absolutePath)
+}
+
+export interface LogEntry {
+  t: string
+  e: string
+  d: string
+}
+
+export function readLogs(limit: number): Promise<LogEntry[]> {
+  return invoke('read_logs', { limit })
 }

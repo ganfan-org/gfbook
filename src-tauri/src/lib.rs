@@ -1,5 +1,6 @@
 mod commands;
 mod git;
+mod logger;
 mod models;
 
 use commands::*;
@@ -45,6 +46,8 @@ pub fn run() {
             get_proxy_setting,
             set_proxy_setting,
             git_list_conflicted,
+            attempt_merge,
+            resolve_conflict,
             read_file_base64,
             get_asset_url,
             save_image_to_book,
@@ -52,6 +55,7 @@ pub fn run() {
             download_image_url,
             reveal_in_finder,
             path_exists,
+            read_logs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

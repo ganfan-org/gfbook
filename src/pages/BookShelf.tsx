@@ -1,11 +1,11 @@
-import AddIcon from '@mui/icons-material/Add';
-import DeleteIcon from '@mui/icons-material/Delete';
-import DriveFileRenameOutlineIcon from '@mui/icons-material/DriveFileRenameOutline';
-import FolderOpenIcon from '@mui/icons-material/FolderOpen';
-import DarkModeIcon from '@mui/icons-material/DarkMode';
-import LightModeIcon from '@mui/icons-material/LightMode';
-import SettingsIcon from '@mui/icons-material/Settings';
-import MoreVertIcon from '@mui/icons-material/MoreVert';
+import AddIcon from '@mui/icons-material/Add'
+import DeleteIcon from '@mui/icons-material/Delete'
+import DriveFileRenameOutlineIcon from '@mui/icons-material/DriveFileRenameOutline'
+import FolderOpenIcon from '@mui/icons-material/FolderOpen'
+import DarkModeIcon from '@mui/icons-material/DarkMode'
+import LightModeIcon from '@mui/icons-material/LightMode'
+import SettingsIcon from '@mui/icons-material/Settings'
+import MoreVertIcon from '@mui/icons-material/MoreVert'
 import {
   Box,
   Typography,
@@ -26,17 +26,18 @@ import {
   CardMedia,
   CardActionArea,
   Divider,
-} from '@mui/material';
-import { open } from '@tauri-apps/plugin-dialog';
-import { useState, useEffect } from 'react';
-import { getBooksDir, pathExists } from '../utils/commands';
-import { useBooks } from '../hooks/useBooks';
-import type { BookInfo } from '../types';
+} from '@mui/material'
+import { open } from '@tauri-apps/plugin-dialog'
+import { useState, useEffect } from 'react'
+import { getBooksDir, pathExists, readLogs } from '../utils/commands'
+import type { LogEntry } from '../utils/commands'
+import { useBooks } from '../hooks/useBooks'
+import type { BookInfo } from '../types'
 
 interface BookShelfProps {
-  onOpenBook: (bookPath: string) => void;
-  onToggleTheme: () => void;
-  mode: 'light' | 'dark';
+  onOpenBook: (bookPath: string) => void
+  onToggleTheme: () => void
+  mode: 'light' | 'dark'
 }
 
 const COVER_COLORS = [
@@ -56,36 +57,50 @@ const COVER_COLORS = [
   ['#D35400', '#A04000'],
   ['#16A085', '#0E6655'],
   ['#27AE60', '#1E8449'],
-];
+]
 
 function hashColor(title: string): [string, string] {
-  let hash = 0;
+  let hash = 0
   for (let i = 0; i < title.length; i++) {
-    hash = title.charCodeAt(i) + ((hash << 5) - hash);
+    hash = title.charCodeAt(i) + ((hash << 5) - hash)
   }
-  const idx = Math.abs(hash) % COVER_COLORS.length;
-  return COVER_COLORS[idx] as [string, string];
+  const idx = Math.abs(hash) % COVER_COLORS.length
+  return COVER_COLORS[idx] as [string, string]
 }
 
 function formatDate(ts: number): string {
-  const d = new Date(ts);
-  const now = new Date();
-  const diff = now.getTime() - d.getTime();
-  if (diff < 24 * 60 * 60 * 1000) return 'Today';
-  if (diff < 48 * 60 * 60 * 1000) return 'Yesterday';
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const d = new Date(ts)
+  const now = new Date()
+  const diff = now.getTime() - d.getTime()
+  if (diff < 24 * 60 * 60 * 1000) return 'Today'
+  if (diff < 48 * 60 * 60 * 1000) return 'Yesterday'
+  return d.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
 }
 
-function BookCover({ title, onClick, onDelete, onRename }: { title: string; onClick: () => void; onDelete: () => void; onRename: () => void }) {
-  const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
-  const [primary, secondary] = hashColor(title);
+function BookCover({
+  title,
+  onClick,
+  onDelete,
+  onRename,
+}: {
+  title: string
+  onClick: () => void
+  onDelete: () => void
+  onRename: () => void
+}) {
+  const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null)
+  const [primary, secondary] = hashColor(title)
 
   const initials = title
     .split(' ')
     .map((w) => w[0])
     .join('')
     .slice(0, 3)
-    .toUpperCase();
+    .toUpperCase()
 
   return (
     <Card
@@ -132,8 +147,8 @@ function BookCover({ title, onClick, onDelete, onRename }: { title: string; onCl
         <IconButton
           size="small"
           onClick={(e) => {
-            e.stopPropagation();
-            setMenuAnchor(e.currentTarget);
+            e.stopPropagation()
+            setMenuAnchor(e.currentTarget)
           }}
           sx={{
             position: 'absolute',
@@ -147,13 +162,31 @@ function BookCover({ title, onClick, onDelete, onRename }: { title: string; onCl
         >
           <MoreVertIcon sx={{ fontSize: 16 }} />
         </IconButton>
-        <Menu anchorEl={menuAnchor} open={!!menuAnchor} onClose={() => setMenuAnchor(null)}>
-          <MenuItem onClick={() => { setMenuAnchor(null); onRename(); }}>
-            <ListItemIcon><DriveFileRenameOutlineIcon fontSize="small" /></ListItemIcon>
+        <Menu
+          anchorEl={menuAnchor}
+          open={!!menuAnchor}
+          onClose={() => setMenuAnchor(null)}
+        >
+          <MenuItem
+            onClick={() => {
+              setMenuAnchor(null)
+              onRename()
+            }}
+          >
+            <ListItemIcon>
+              <DriveFileRenameOutlineIcon fontSize="small" />
+            </ListItemIcon>
             <Typography variant="body2">Rename</Typography>
           </MenuItem>
-          <MenuItem onClick={() => { setMenuAnchor(null); onDelete(); }}>
-            <ListItemIcon><DeleteIcon fontSize="small" /></ListItemIcon>
+          <MenuItem
+            onClick={() => {
+              setMenuAnchor(null)
+              onDelete()
+            }}
+          >
+            <ListItemIcon>
+              <DeleteIcon fontSize="small" />
+            </ListItemIcon>
             <Typography variant="body2">Delete</Typography>
           </MenuItem>
         </Menu>
@@ -164,143 +197,213 @@ function BookCover({ title, onClick, onDelete, onRename }: { title: string; onCl
         </Typography>
       </CardContent>
     </Card>
-  );
+  )
 }
 
-export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelfProps) {
-  const { books, loading, createBook, removeBook, changeBookName, importExternalBook, getGlobalSettings, setGlobalSettings } = useBooks();
-  const [newDialogOpen, setNewDialogOpen] = useState(false);
-  const [newTitle, setNewTitle] = useState('');
-  const [newFolderName, setNewFolderName] = useState('');
-  const [newFolderError, setNewFolderError] = useState('');
-  const [newPathExists, setNewPathExists] = useState(false);
-  const [newParentDir, setNewParentDir] = useState('');
+export default function BookShelf({
+  onOpenBook,
+  onToggleTheme,
+  mode,
+}: BookShelfProps) {
+  const {
+    books,
+    loading,
+    createBook,
+    removeBook,
+    changeBookName,
+    importExternalBook,
+    getGlobalSettings,
+    setGlobalSettings,
+  } = useBooks()
+  const [newDialogOpen, setNewDialogOpen] = useState(false)
+  const [newTitle, setNewTitle] = useState('')
+  const [newFolderName, setNewFolderName] = useState('')
+  const [newFolderError, setNewFolderError] = useState('')
+  const [newPathExists, setNewPathExists] = useState(false)
+  const [newParentDir, setNewParentDir] = useState('')
 
-  const INVALID_FOLDER_CHARS = /[<>:"/\\|?*\x00-\x1f]/g;
-  const INVALID_FOLDER_NAMES = ['', '.', '..', 'CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9', 'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'];
+  const INVALID_FOLDER_CHARS = /[<>:"/\\|?*\x00-\x1f]/g
+  const INVALID_FOLDER_NAMES = [
+    '',
+    '.',
+    '..',
+    'CON',
+    'PRN',
+    'AUX',
+    'NUL',
+    'COM1',
+    'COM2',
+    'COM3',
+    'COM4',
+    'COM5',
+    'COM6',
+    'COM7',
+    'COM8',
+    'COM9',
+    'LPT1',
+    'LPT2',
+    'LPT3',
+    'LPT4',
+    'LPT5',
+    'LPT6',
+    'LPT7',
+    'LPT8',
+    'LPT9',
+  ]
 
   function validateFolderName(name: string): string {
-    if (!name.trim()) return 'Folder name is required';
-    if (INVALID_FOLDER_CHARS.test(name)) return 'Folder name cannot contain: < > : " / \\ | ? *';
-    if (name.startsWith('.') || name.endsWith('.')) return 'Folder name cannot start or end with a dot';
-    if (name.endsWith(' ') || name.endsWith('.')) return 'Folder name cannot end with space or dot';
-    if (INVALID_FOLDER_NAMES.includes(name.toUpperCase())) return `"${name}" is not allowed as a folder name`;
-    if (name.length > 255) return 'Folder name is too long (max 255 characters)';
-    return '';
+    if (!name.trim()) return 'Folder name is required'
+    if (INVALID_FOLDER_CHARS.test(name))
+      return 'Folder name cannot contain: < > : " / \\ | ? *'
+    if (name.startsWith('.') || name.endsWith('.'))
+      return 'Folder name cannot start or end with a dot'
+    if (name.endsWith(' ') || name.endsWith('.'))
+      return 'Folder name cannot end with space or dot'
+    if (INVALID_FOLDER_NAMES.includes(name.toUpperCase()))
+      return `"${name}" is not allowed as a folder name`
+    if (name.length > 255) return 'Folder name is too long (max 255 characters)'
+    return ''
   }
-  const [deleteConfirm, setDeleteConfirm] = useState<BookInfo | null>(null);
-  const [renameTarget, setRenameTarget] = useState<BookInfo | null>(null);
-  const [renameTitle, setRenameTitle] = useState('');
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [globalGitName, setGlobalGitName] = useState('');
-  const [globalGitEmail, setGlobalGitEmail] = useState('');
-  const [globalProxy, setGlobalProxy] = useState('');
+  const [deleteConfirm, setDeleteConfirm] = useState<BookInfo | null>(null)
+  const [renameTarget, setRenameTarget] = useState<BookInfo | null>(null)
+  const [renameTitle, setRenameTitle] = useState('')
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [globalGitName, setGlobalGitName] = useState('')
+  const [globalGitEmail, setGlobalGitEmail] = useState('')
+  const [globalProxy, setGlobalProxy] = useState('')
+  const [logs, setLogs] = useState<LogEntry[]>([])
 
   const handleCreate = async () => {
-    if (!newTitle.trim()) return;
+    if (!newTitle.trim()) return
     try {
-      const bookDir = `${newParentDir}/${newFolderName}`;
-      await createBook(newTitle.trim(), bookDir);
-      setNewDialogOpen(false);
-      setNewTitle('');
+      const bookDir = `${newParentDir}/${newFolderName}`
+      await createBook(newTitle.trim(), bookDir)
+      setNewDialogOpen(false)
+      setNewTitle('')
     } catch (e) {
-      console.error('Failed to create book:', e);
+      console.error('Failed to create book:', e)
     }
-  };
+  }
 
   useEffect(() => {
     if (newDialogOpen) {
       getBooksDir().then((dir) => {
-        setNewParentDir(dir);
-        setNewFolderName('');
-        setNewTitle('');
-        setNewPathExists(false);
-      });
+        setNewParentDir(dir)
+        setNewFolderName('')
+        setNewTitle('')
+        setNewPathExists(false)
+      })
     }
-  }, [newDialogOpen]);
+  }, [newDialogOpen])
 
   // Check if the target path already exists
   useEffect(() => {
-    if (!newFolderName.trim() || !newParentDir.trim()) return;
-    const fullPath = `${newParentDir}/${newFolderName}`;
-    pathExists(fullPath).then(setNewPathExists);
-  }, [newFolderName, newParentDir]);
+    if (!newFolderName.trim() || !newParentDir.trim()) return
+    const fullPath = `${newParentDir}/${newFolderName}`
+    pathExists(fullPath).then(setNewPathExists)
+  }, [newFolderName, newParentDir])
 
   const handleImport = async () => {
-    console.log('[BookShelf] Open Book clicked');
+    console.log('[BookShelf] Open Book clicked')
     const selected = await open({
       directory: true,
       multiple: false,
       title: 'Select book folder',
-    });
-    console.log('[BookShelf] dialog returned:', selected);
+    })
+    console.log('[BookShelf] dialog returned:', selected)
     if (selected) {
       try {
-        const result = await importExternalBook(selected);
-        console.log('[BookShelf] import success:', result);
+        const result = await importExternalBook(selected)
+        console.log('[BookShelf] import success:', result)
       } catch (e) {
-        console.error('[BookShelf] Failed to import book:', e);
+        console.error('[BookShelf] Failed to import book:', e)
       }
     }
-  };
+  }
 
   const handleDelete = async () => {
-    if (!deleteConfirm) return;
+    if (!deleteConfirm) return
     try {
-      await removeBook(deleteConfirm.path);
-      setDeleteConfirm(null);
+      await removeBook(deleteConfirm.path)
+      setDeleteConfirm(null)
     } catch (e) {
-      console.error('Failed to delete book:', e);
+      console.error('Failed to delete book:', e)
     }
-  };
+  }
 
   const handleRenameOpen = (book: BookInfo) => {
-    setRenameTitle(book.title);
-    setRenameTarget(book);
-  };
+    setRenameTitle(book.title)
+    setRenameTarget(book)
+  }
 
   const handleRename = async () => {
-    if (!renameTarget || !renameTitle.trim()) return;
+    if (!renameTarget || !renameTitle.trim()) return
     try {
-      await changeBookName(renameTarget.path, renameTitle.trim());
-      setRenameTarget(null);
-      setRenameTitle('');
+      await changeBookName(renameTarget.path, renameTitle.trim())
+      setRenameTarget(null)
+      setRenameTitle('')
     } catch (e) {
-      console.error('Failed to rename book:', e);
+      console.error('Failed to rename book:', e)
     }
-  };
+  }
 
   if (loading) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="100vh">
+      <Box
+        display="flex"
+        justifyContent="center"
+        alignItems="center"
+        minHeight="100vh"
+      >
         <CircularProgress />
       </Box>
-    );
+    )
   }
 
   return (
     <Box sx={{ maxWidth: 1200, mx: 'auto', px: 4, py: 3 }}>
-      <Box display="flex" alignItems="center" justifyContent="space-between" mb={4}>
+      <Box
+        display="flex"
+        alignItems="center"
+        justifyContent="space-between"
+        mb={4}
+      >
         <Typography variant="h4" fontWeight={700}>
           Library
         </Typography>
         <Box display="flex" gap={1} alignItems="center">
-          <Button variant="outlined" startIcon={<FolderOpenIcon />} onClick={handleImport}>
+          <Button
+            variant="outlined"
+            startIcon={<FolderOpenIcon />}
+            onClick={handleImport}
+          >
             Open Book
           </Button>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setNewDialogOpen(true)}>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => setNewDialogOpen(true)}
+          >
             New Book
           </Button>
           <IconButton onClick={onToggleTheme}>
             {mode === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
           </IconButton>
-          <IconButton onClick={async () => {
-            const s = await getGlobalSettings();
-            setGlobalGitName(s.name);
-            setGlobalGitEmail(s.email);
-            setGlobalProxy(s.proxy);
-            setSettingsOpen(true);
-          }}>
+          <IconButton
+            onClick={async () => {
+              const s = await getGlobalSettings()
+              setGlobalGitName(s.name)
+              setGlobalGitEmail(s.email)
+              setGlobalProxy(s.proxy)
+              try {
+                const entries = await readLogs(200)
+                setLogs(entries.reverse())
+              } catch {
+                /* ignore */
+              }
+              setSettingsOpen(true)
+            }}
+          >
             <SettingsIcon />
           </IconButton>
         </Box>
@@ -314,7 +417,11 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
           <Typography color="text.secondary" mb={3}>
             Create your first book or import an existing one to get started
           </Typography>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setNewDialogOpen(true)}>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => setNewDialogOpen(true)}
+          >
             Create Your First Book
           </Button>
         </Box>
@@ -335,7 +442,11 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
                 onDelete={() => setDeleteConfirm(book)}
                 onRename={() => handleRenameOpen(book)}
               />
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5, pl: 0.5 }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: 'block', mt: 0.5, pl: 0.5 }}
+              >
                 {formatDate(book.updated_time)}
               </Typography>
             </Box>
@@ -343,7 +454,12 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
         </Box>
       )}
 
-      <Dialog open={newDialogOpen} onClose={() => setNewDialogOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog
+        open={newDialogOpen}
+        onClose={() => setNewDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
         <DialogTitle>New Book</DialogTitle>
         <DialogContent>
           <TextField
@@ -353,12 +469,16 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
             fullWidth
             value={newTitle}
             onChange={(e) => {
-              setNewTitle(e.target.value);
+              setNewTitle(e.target.value)
               // Auto-generate folder name from title
-              let slug = e.target.value.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-').replace(/^-|-$/g, '') || 'untitled';
-              slug = slug.replace(INVALID_FOLDER_CHARS, '');
-              setNewFolderName(slug);
-              setNewFolderError(validateFolderName(slug));
+              let slug =
+                e.target.value
+                  .toLowerCase()
+                  .replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-')
+                  .replace(/^-|-$/g, '') || 'untitled'
+              slug = slug.replace(INVALID_FOLDER_CHARS, '')
+              setNewFolderName(slug)
+              setNewFolderError(validateFolderName(slug))
             }}
           />
           <TextField
@@ -367,12 +487,16 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
             fullWidth
             value={newFolderName}
             error={!!newFolderError || newPathExists}
-            helperText={newPathExists ? 'This path already exists' : (newFolderError || 'Folder name on disk')}
+            helperText={
+              newPathExists
+                ? 'This path already exists'
+                : newFolderError || 'Folder name on disk'
+            }
             onChange={(e) => {
-              const val = e.target.value;
-              setNewFolderName(val);
-              setNewFolderError(validateFolderName(val));
-              setNewPathExists(false);
+              const val = e.target.value
+              setNewFolderName(val)
+              setNewFolderError(validateFolderName(val))
+              setNewPathExists(false)
             }}
             sx={{ mt: 1 }}
           />
@@ -386,56 +510,183 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
             sx={{ mt: 1 }}
             InputProps={{
               endAdornment: (
-                <Button size="small" sx={{ minWidth: 'auto', textTransform: 'none' }}
+                <Button
+                  size="small"
+                  sx={{ minWidth: 'auto', textTransform: 'none' }}
                   onClick={async () => {
-                    const sel = await open({ directory: true, multiple: false, title: 'Select location' });
-                    if (sel) setNewParentDir(sel);
-                  }}>
+                    const sel = await open({
+                      directory: true,
+                      multiple: false,
+                      title: 'Select location',
+                    })
+                    if (sel) setNewParentDir(sel)
+                  }}
+                >
                   Browse
                 </Button>
               ),
             }}
           />
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ display: 'block', mt: 1 }}
+          >
             Will be created at: {newParentDir}/{newFolderName}
           </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setNewDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleCreate} variant="contained" disabled={!newTitle.trim() || !newFolderName.trim() || !!newFolderError || newPathExists}>
+          <Button
+            onClick={handleCreate}
+            variant="contained"
+            disabled={
+              !newTitle.trim() ||
+              !newFolderName.trim() ||
+              !!newFolderError ||
+              newPathExists
+            }
+          >
             Create
           </Button>
         </DialogActions>
       </Dialog>
 
-      <Dialog open={settingsOpen} onClose={() => setSettingsOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
         <DialogTitle>Settings</DialogTitle>
         <DialogContent>
-          <Typography variant="subtitle2" gutterBottom>Git Author</Typography>
+          <Typography variant="subtitle2" gutterBottom>
+            Git Author
+          </Typography>
           <Box display="flex" gap={1} mb={2}>
-            <TextField size="small" label="Name" placeholder="Your Name"
-              value={globalGitName} onChange={(e) => setGlobalGitName(e.target.value)} sx={{ flex: 1 }} />
-            <TextField size="small" label="Email" placeholder="you@example.com"
-              value={globalGitEmail} onChange={(e) => setGlobalGitEmail(e.target.value)} sx={{ flex: 1 }} />
+            <TextField
+              size="small"
+              label="Name"
+              placeholder="Your Name"
+              value={globalGitName}
+              onChange={(e) => setGlobalGitName(e.target.value)}
+              sx={{ flex: 1 }}
+            />
+            <TextField
+              size="small"
+              label="Email"
+              placeholder="you@example.com"
+              value={globalGitEmail}
+              onChange={(e) => setGlobalGitEmail(e.target.value)}
+              sx={{ flex: 1 }}
+            />
           </Box>
 
           <Divider sx={{ my: 2 }} />
 
-          <Typography variant="subtitle2" gutterBottom>Proxy</Typography>
+          <Typography variant="subtitle2" gutterBottom>
+            Proxy
+          </Typography>
           <Box display="flex" gap={1} alignItems="center" mb={1}>
-            <TextField size="small" placeholder="http://proxy:8080" value={globalProxy}
-              onChange={(e) => setGlobalProxy(e.target.value)} sx={{ flex: 1 }} />
+            <TextField
+              size="small"
+              placeholder="http://proxy:8080"
+              value={globalProxy}
+              onChange={(e) => setGlobalProxy(e.target.value)}
+              sx={{ flex: 1 }}
+            />
           </Box>
+
+          <Divider sx={{ my: 2 }} />
+
+          <Typography variant="subtitle2" gutterBottom>
+            Activity Log
+          </Typography>
+          {logs.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              No logs
+            </Typography>
+          ) : (
+            <Box
+              sx={{
+                fontFamily: 'monospace',
+                fontSize: '0.7rem',
+                whiteSpace: 'pre-wrap',
+                lineHeight: 1.6,
+                maxHeight: 250,
+                overflow: 'auto',
+                border: 1,
+                borderColor: 'divider',
+                borderRadius: 1,
+                p: 1,
+              }}
+            >
+              {logs.map((entry, i) => (
+                <Box
+                  key={i}
+                  sx={{
+                    py: 0.2,
+                    borderBottom: '1px solid',
+                    borderColor: 'divider',
+                  }}
+                >
+                  <Box component="span" sx={{ color: 'text.secondary', mr: 1 }}>
+                    {new Date(entry.t).toLocaleString()}
+                  </Box>
+                  <Box
+                    component="span"
+                    sx={{
+                      color:
+                        entry.e.startsWith('set_') ||
+                        entry.e === 'import_image' ||
+                        entry.e === 'paste_image' ||
+                        entry.e === 'download_image'
+                          ? 'info.main'
+                          : entry.e.startsWith('create_')
+                            ? 'success.main'
+                            : entry.e.startsWith('delete_')
+                              ? 'error.main'
+                              : 'warning.main',
+                      mr: 1,
+                      fontWeight: 600,
+                    }}
+                  >
+                    [{entry.e}]
+                  </Box>
+                  <Box component="span">{entry.d}</Box>
+                </Box>
+              ))}
+            </Box>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setSettingsOpen(false)}>Cancel</Button>
-          <Button onClick={async () => {
-            try { await setGlobalSettings(globalGitName, globalGitEmail, globalProxy); setSettingsOpen(false); } catch (e) { console.error(e); }
-          }} variant="contained">Save</Button>
+          <Button
+            onClick={async () => {
+              try {
+                await setGlobalSettings(
+                  globalGitName,
+                  globalGitEmail,
+                  globalProxy,
+                )
+                setSettingsOpen(false)
+              } catch (e) {
+                console.error(e)
+              }
+            }}
+            variant="contained"
+          >
+            Save
+          </Button>
         </DialogActions>
       </Dialog>
 
-      <Dialog open={!!renameTarget} onClose={() => setRenameTarget(null)} maxWidth="xs" fullWidth>
+      <Dialog
+        open={!!renameTarget}
+        onClose={() => setRenameTarget(null)}
+        maxWidth="xs"
+        fullWidth
+      >
         <DialogTitle>Rename Book</DialogTitle>
         <DialogContent>
           <TextField
@@ -450,17 +701,27 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setRenameTarget(null)}>Cancel</Button>
-          <Button onClick={handleRename} variant="contained" disabled={!renameTitle.trim()}>
+          <Button
+            onClick={handleRename}
+            variant="contained"
+            disabled={!renameTitle.trim()}
+          >
             Rename
           </Button>
         </DialogActions>
       </Dialog>
 
-      <Dialog open={!!deleteConfirm} onClose={() => setDeleteConfirm(null)} maxWidth="xs" fullWidth>
+      <Dialog
+        open={!!deleteConfirm}
+        onClose={() => setDeleteConfirm(null)}
+        maxWidth="xs"
+        fullWidth
+      >
         <DialogTitle>Delete Book</DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to delete "{deleteConfirm?.title}"? This action cannot be undone.
+            Are you sure you want to delete "{deleteConfirm?.title}"? This
+            action cannot be undone.
           </Typography>
         </DialogContent>
         <DialogActions>
@@ -471,5 +732,5 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
         </DialogActions>
       </Dialog>
     </Box>
-  );
+  )
 }
