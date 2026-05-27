@@ -223,8 +223,16 @@ export interface LogEntry {
   t: string
   e: string
   d: string
+  b?: string
 }
 
 export function readLogs(limit: number): Promise<LogEntry[]> {
   return invoke('read_logs', { limit })
+}
+
+export function readBookLogs(
+  limit: number,
+  bookPath: string,
+): Promise<LogEntry[]> {
+  return invoke('read_book_logs', { limit, bookPath })
 }

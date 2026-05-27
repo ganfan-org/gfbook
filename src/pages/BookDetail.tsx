@@ -5,7 +5,6 @@ import SettingsIcon from '@mui/icons-material/Settings'
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'
 import {
   Box,
-  Drawer,
   Typography,
   IconButton,
   Divider,
@@ -15,20 +14,22 @@ import {
   DialogActions,
   Button,
   TextField,
-  Tooltip,
 } from '@mui/material'
 import { listen } from '@tauri-apps/api/event'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import ChapterEditor from '../components/ChapterEditor'
 import ChapterTree from '../components/ChapterTree'
+import BookSettingsDialog from '../components/BookSettingsDialog'
 import { useBook } from '../hooks/useBook'
 import {
   revealInFinder,
   gitListConflicted,
   resolveConflict,
   attemptMerge,
-  readLogs,
+  readBookLogs,
+  deleteBook,
+  renameBook,
 } from '../utils/commands'
 import type { LogEntry } from '../utils/commands'
 import type { Chapter } from '../types'
@@ -62,6 +63,7 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
     getAheadBehind,
     getUserConfig,
     refreshGitStatus,
+    refreshMeta,
   } = useBook(bookPath)
 
   const [addDialogOpen, setAddDialogOpen] = useState(false)
@@ -82,16 +84,17 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
   const [resolvedFiles, setResolvedFiles] = useState<Set<string>>(new Set())
   const [mergeInProgress, setMergeInProgress] = useState(false)
   const [logs, setLogs] = useState<LogEntry[]>([])
-  const [showLogs, setShowLogs] = useState(false)
 
   const refreshLogs = useCallback(async () => {
     try {
-      const entries = await readLogs(100)
-      setLogs(entries.reverse())
+      const entries = await readBookLogs(200, bookPath)
+      const reversed = entries.reverse()
+      setLogs(reversed)
+      return reversed
     } catch {
-      /* ignore */
+      return [] as LogEntry[]
     }
-  }, [])
+  }, [bookPath])
 
   const refreshAheadBehind = useCallback(async () => {
     if (!bookPath) return
@@ -525,365 +528,67 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
         )}
       </Box>
 
-      <Dialog
+      <BookSettingsDialog
         open={commitDialogOpen}
         onClose={() => {
           setCommitDialogOpen(false)
           setSyncOutput('')
         }}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>Settings</DialogTitle>
-        <DialogContent>
-          <Typography variant="subtitle2" gutterBottom>
-            Storage
-          </Typography>
-          <Typography
-            variant="body2"
-            sx={{
-              fontFamily: 'monospace',
-              fontSize: '0.8rem',
-              wordBreak: 'break-all',
-              mb: 1,
-            }}
-          >
-            {bookPath}
-          </Typography>
-          <Button
-            size="small"
-            startIcon={<FolderOpenIcon />}
-            variant="outlined"
-            onClick={() => revealInFinder(bookPath)}
-          >
-            {navigator.platform.includes('Win')
-              ? 'Show in Explorer'
-              : navigator.platform.includes('Mac')
-                ? 'Reveal in Finder'
-                : 'Open Folder'}
-          </Button>
-
-          <Divider sx={{ my: 2 }} />
-
-          <Typography variant="subtitle2" gutterBottom>
-            Git Changes
-          </Typography>
-          <Typography
-            variant="body2"
-            color="text.secondary"
-            mb={2}
-            sx={{
-              fontFamily: 'monospace',
-              fontSize: '0.8rem',
-              whiteSpace: 'pre-wrap',
-            }}
-          >
-            {gitStatusText || 'No changes'}
-          </Typography>
-
-          {gitStatusText && (
-            <>
-              <TextField
-                autoFocus
-                margin="dense"
-                label="Commit Message"
-                fullWidth
-                multiline
-                rows={2}
-                value={commitMessage}
-                onChange={(e) => setCommitMessage(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                    handleCommit()
-                  }
-                }}
-              />
-              <Box textAlign="right" mt={1} mb={2}>
-                <Button
-                  onClick={handleCommit}
-                  variant="contained"
-                  size="small"
-                  disabled={!commitMessage.trim()}
-                >
-                  Commit
-                </Button>
-              </Box>
-            </>
-          )}
-
-          <Divider sx={{ my: 2 }} />
-
-          <Typography variant="subtitle2" gutterBottom>
-            Remote
-          </Typography>
-          {remoteUrlState && (
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{
-                display: 'block',
-                mb: 0.5,
-                fontFamily: 'monospace',
-                fontSize: '0.75rem',
-              }}
-            >
-              current: {remoteUrlState}
-            </Typography>
-          )}
-          <TextField
-            size="small"
-            fullWidth
-            placeholder="https://github.com/user/repo.git"
-            value={remoteUrlDraft}
-            onChange={(e) => setRemoteUrlDraft(e.target.value)}
-            sx={{ mb: 1 }}
-          />
-          <Box display="flex" gap={1} mb={1}>
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={async () => {
-                try {
-                  const url = await getRemoteUrl()
-                  setRemoteUrlState(url || '')
-                  setRemoteUrlDraft(url || '')
-                } catch {
-                  /* ignore */
-                }
-              }}
-            >
-              Load
-            </Button>
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={async () => {
-                try {
-                  await setRemoteUrlApi(remoteUrlDraft)
-                  setRemoteUrlState(remoteUrlDraft)
-                } catch (e) {
-                  console.error(e)
-                }
-              }}
-            >
-              Set URL
-            </Button>
-          </Box>
-
-          <Box display="flex" gap={1} mb={1}>
-            <Button
-              size="small"
-              variant="outlined"
-              disabled={!!syncingType}
-              onClick={async () => {
-                setSyncingType('fetch')
-                setSyncOutput('')
-                await fetchRemote()
-              }}
-            >
-              {syncingType === 'fetch' ? 'Fetching...' : 'Fetch'}
-            </Button>
-            <Button
-              size="small"
-              variant="outlined"
-              disabled={!!syncingType}
-              onClick={async () => {
-                setSyncingType('pull')
-                setSyncOutput('')
-                await pullRemote()
-              }}
-            >
-              {syncingType === 'pull' ? 'Pulling...' : 'Pull'}
-            </Button>
-            <Button
-              size="small"
-              variant="outlined"
-              disabled={!!syncingType}
-              onClick={async () => {
-                setSyncingType('push')
-                setSyncOutput('')
-                await pushRemote()
-              }}
-            >
-              {syncingType === 'push' ? 'Pushing...' : 'Push'}
-            </Button>
-            <Button
-              size="small"
-              variant="outlined"
-              color="warning"
-              disabled={!!syncingType || mergeInProgress}
-              onClick={handleAttemptMerge}
-            >
-              {mergeInProgress ? 'Merging...' : 'Merge'}
-            </Button>
-          </Box>
-
-          {conflictedFiles.length > 0 && (
-            <Box mt={1} mb={1}>
-              <Divider sx={{ my: 1 }} />
-              <Typography variant="subtitle2" color="error" gutterBottom>
-                ⚠ Conflicted Files
-              </Typography>
-              {conflictedFiles.map((file) => (
-                <Box
-                  key={file}
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1,
-                    py: 0.5,
-                  }}
-                >
-                  <Typography
-                    variant="caption"
-                    sx={{
-                      flex: 1,
-                      fontFamily: 'monospace',
-                      fontSize: '0.7rem',
-                      wordBreak: 'break-all',
-                    }}
-                  >
-                    {resolvedFiles.has(file) ? '✅ ' : ''}
-                    {file}
-                  </Typography>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    color="success"
-                    sx={{ fontSize: '0.65rem', minWidth: 80 }}
-                    onClick={() => handleResolveFile(file, true)}
-                    disabled={resolvedFiles.has(file)}
-                  >
-                    Keep Remote
-                  </Button>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    color="warning"
-                    sx={{ fontSize: '0.65rem', minWidth: 80 }}
-                    onClick={() => handleResolveFile(file, false)}
-                    disabled={resolvedFiles.has(file)}
-                  >
-                    Keep Local
-                  </Button>
-                </Box>
-              ))}
-              {conflictedFiles.every((f) => resolvedFiles.has(f)) && (
-                <Button
-                  size="small"
-                  variant="contained"
-                  sx={{ mt: 1 }}
-                  onClick={handleCommitMerge}
-                >
-                  Commit Merge
-                </Button>
-              )}
-            </Box>
-          )}
-
-          <Box
-            sx={{
-              bgcolor: 'grey.900',
-              color: '#a8d85a',
-              p: 1.5,
-              borderRadius: 1,
-              mt: 2,
-              minHeight: 60,
-              maxHeight: 150,
-              overflow: 'auto',
-              fontFamily: 'monospace',
-              fontSize: '0.75rem',
-              whiteSpace: 'pre-wrap',
-              lineHeight: 1.5,
-            }}
-          >
-            {syncingType ? (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Box
-                  sx={{
-                    width: 12,
-                    height: 12,
-                    border: '2px solid #a8d85a',
-                    borderTopColor: 'transparent',
-                    borderRadius: '50%',
-                    animation: 'spin 0.6s linear infinite',
-                  }}
-                >
-                  <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-                </Box>
-                <span>
-                  {syncingType === 'fetch'
-                    ? 'Fetching...'
-                    : syncingType === 'pull'
-                      ? 'Pulling...'
-                      : syncingType === 'push'
-                        ? 'Pushing...'
-                        : 'Merging...'}
-                </span>
-              </Box>
-            ) : syncOutput ? (
-              syncOutput
-            ) : (
-              <span style={{ color: '#666' }}>Ready</span>
-            )}
-          </Box>
-
-          <Divider sx={{ my: 2 }} />
-
-          <Box display="flex" alignItems="center" gap={1}>
-            <Button
-              size="small"
-              onClick={() => {
-                setShowLogs(!showLogs)
-                if (!showLogs) refreshLogs()
-              }}
-            >
-              {showLogs ? 'Hide Log' : 'Show Log'}
-            </Button>
-          </Box>
-
-          {showLogs && (
-            <Box
-              sx={{
-                mt: 1,
-                bgcolor: 'grey.900',
-                color: '#a8d85a',
-                p: 1.5,
-                borderRadius: 1,
-                maxHeight: 200,
-                overflow: 'auto',
-                fontFamily: 'monospace',
-                fontSize: '0.7rem',
-                whiteSpace: 'pre-wrap',
-                lineHeight: 1.5,
-              }}
-            >
-              {logs.length === 0 ? (
-                <span style={{ color: '#666' }}>No logs</span>
-              ) : (
-                logs.map((entry, i) => (
-                  <Box key={i} sx={{ mb: 0.3 }}>
-                    <span style={{ color: '#888' }}>
-                      {new Date(entry.t).toLocaleTimeString()}{' '}
-                    </span>
-                    <span style={{ color: '#fff' }}>[{entry.e}]</span> {entry.d}
-                  </Box>
-                ))
-              )}
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button
-            onClick={() => {
-              setCommitDialogOpen(false)
-              setSyncOutput('')
-            }}
-          >
-            Close
-          </Button>
-        </DialogActions>
-      </Dialog>
+        bookPath={bookPath}
+        bookTitle={meta?.title || ''}
+        updatedTime={meta?.updated_time || 0}
+        onRename={async (title) => {
+          await renameBook(bookPath, title)
+          refreshMeta()
+        }}
+        onDelete={async () => {
+          await deleteBook(bookPath)
+          setCommitDialogOpen(false)
+          onBack()
+        }}
+        onRevealInFinder={() => revealInFinder(bookPath)}
+        gitStatusText={gitStatusText}
+        commitMessage={commitMessage}
+        setCommitMessage={setCommitMessage}
+        onCommit={handleCommit}
+        remoteUrl={remoteUrlState}
+        remoteDraft={remoteUrlDraft}
+        onRemoteDraftChange={setRemoteUrlDraft}
+        onLoadRemote={async () => {
+          const url = await getRemoteUrl()
+          setRemoteUrlState(url || '')
+          setRemoteUrlDraft(url || '')
+        }}
+        onSetRemoteUrl={async () => {
+          await setRemoteUrlApi(remoteUrlDraft)
+          setRemoteUrlState(remoteUrlDraft)
+        }}
+        onFetch={async () => {
+          setSyncingType('fetch')
+          setSyncOutput('')
+          await fetchRemote()
+        }}
+        onPull={async () => {
+          setSyncingType('pull')
+          setSyncOutput('')
+          await pullRemote()
+        }}
+        onPush={async () => {
+          setSyncingType('push')
+          setSyncOutput('')
+          await pushRemote()
+        }}
+        onMerge={handleAttemptMerge}
+        syncingType={syncingType}
+        mergeInProgress={mergeInProgress}
+        aheadBehind={aheadBehind}
+        conflictedFiles={conflictedFiles}
+        resolvedFiles={resolvedFiles}
+        onResolveFile={handleResolveFile}
+        onCommitMerge={handleCommitMerge}
+        logs={logs}
+        onRefreshLogs={refreshLogs}
+      />
 
       <Dialog
         open={addDialogOpen}

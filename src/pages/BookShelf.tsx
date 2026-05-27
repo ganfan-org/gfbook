@@ -1,6 +1,4 @@
 import AddIcon from '@mui/icons-material/Add'
-import DeleteIcon from '@mui/icons-material/Delete'
-import DriveFileRenameOutlineIcon from '@mui/icons-material/DriveFileRenameOutline'
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
 import LightModeIcon from '@mui/icons-material/LightMode'
@@ -12,7 +10,6 @@ import {
   Button,
   Card,
   CardContent,
-  CardActions,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -20,19 +17,23 @@ import {
   TextField,
   IconButton,
   CircularProgress,
-  Menu,
-  MenuItem,
-  ListItemIcon,
   CardMedia,
   CardActionArea,
   Divider,
 } from '@mui/material'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useState, useEffect } from 'react'
-import { getBooksDir, pathExists, readLogs } from '../utils/commands'
-import type { LogEntry } from '../utils/commands'
+import {
+  getBooksDir,
+  pathExists,
+  readLogs,
+  readBookLogs,
+  revealInFinder,
+} from '../utils/commands'
 import { useBooks } from '../hooks/useBooks'
+import type { LogEntry } from '../utils/commands'
 import type { BookInfo } from '../types'
+import BookSettingsDialog from '../components/BookSettingsDialog'
 
 interface BookShelfProps {
   onOpenBook: (bookPath: string) => void
@@ -86,13 +87,17 @@ function BookCover({
   onClick,
   onDelete,
   onRename,
+  bookPath,
+  updatedTime,
 }: {
   title: string
   onClick: () => void
   onDelete: () => void
-  onRename: () => void
+  onRename: (newTitle: string) => void
+  bookPath: string
+  updatedTime: number
 }) {
-  const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null)
+  const [dialogOpen, setDialogOpen] = useState(false)
   const [primary, secondary] = hashColor(title)
 
   const initials = title
@@ -148,48 +153,45 @@ function BookCover({
           size="small"
           onClick={(e) => {
             e.stopPropagation()
-            setMenuAnchor(e.currentTarget)
+            setDialogOpen(true)
           }}
-          sx={{
+          sx={(t) => ({
             position: 'absolute',
             top: 4,
             right: 4,
-            bgcolor: 'rgba(255,255,255,0.9)',
-            '&:hover': { bgcolor: 'white' },
+            bgcolor:
+              t.palette.mode === 'dark'
+                ? 'rgba(0,0,0,0.7)'
+                : 'rgba(255,255,255,0.9)',
+            '&:hover': {
+              bgcolor: t.palette.mode === 'dark' ? 'rgba(0,0,0,0.9)' : 'white',
+            },
             width: 28,
             height: 28,
-          }}
+          })}
         >
           <MoreVertIcon sx={{ fontSize: 16 }} />
         </IconButton>
-        <Menu
-          anchorEl={menuAnchor}
-          open={!!menuAnchor}
-          onClose={() => setMenuAnchor(null)}
-        >
-          <MenuItem
-            onClick={() => {
-              setMenuAnchor(null)
-              onRename()
-            }}
-          >
-            <ListItemIcon>
-              <DriveFileRenameOutlineIcon fontSize="small" />
-            </ListItemIcon>
-            <Typography variant="body2">Rename</Typography>
-          </MenuItem>
-          <MenuItem
-            onClick={() => {
-              setMenuAnchor(null)
-              onDelete()
-            }}
-          >
-            <ListItemIcon>
-              <DeleteIcon fontSize="small" />
-            </ListItemIcon>
-            <Typography variant="body2">Delete</Typography>
-          </MenuItem>
-        </Menu>
+        <BookSettingsDialog
+          open={dialogOpen}
+          onClose={() => setDialogOpen(false)}
+          bookPath={bookPath}
+          bookTitle={title}
+          updatedTime={updatedTime}
+          onRename={async (newTitle: string) => {
+            onRename(newTitle)
+            setDialogOpen(false)
+          }}
+          onDelete={async () => {
+            onDelete()
+            setDialogOpen(false)
+          }}
+          onRevealInFinder={() => revealInFinder(bookPath)}
+          onRefreshLogs={async () => {
+            const entries = await readBookLogs(200, bookPath)
+            return entries.reverse()
+          }}
+        />
       </Box>
       <CardContent sx={{ px: 1.5, py: 1, '&:last-child': { pb: 1 } }}>
         <Typography variant="body2" fontWeight={600} noWrap sx={{ mb: 0.25 }}>
@@ -264,9 +266,6 @@ export default function BookShelf({
     if (name.length > 255) return 'Folder name is too long (max 255 characters)'
     return ''
   }
-  const [deleteConfirm, setDeleteConfirm] = useState<BookInfo | null>(null)
-  const [renameTarget, setRenameTarget] = useState<BookInfo | null>(null)
-  const [renameTitle, setRenameTitle] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [globalGitName, setGlobalGitName] = useState('')
   const [globalGitEmail, setGlobalGitEmail] = useState('')
@@ -318,32 +317,6 @@ export default function BookShelf({
       } catch (e) {
         console.error('[BookShelf] Failed to import book:', e)
       }
-    }
-  }
-
-  const handleDelete = async () => {
-    if (!deleteConfirm) return
-    try {
-      await removeBook(deleteConfirm.path)
-      setDeleteConfirm(null)
-    } catch (e) {
-      console.error('Failed to delete book:', e)
-    }
-  }
-
-  const handleRenameOpen = (book: BookInfo) => {
-    setRenameTitle(book.title)
-    setRenameTarget(book)
-  }
-
-  const handleRename = async () => {
-    if (!renameTarget || !renameTitle.trim()) return
-    try {
-      await changeBookName(renameTarget.path, renameTitle.trim())
-      setRenameTarget(null)
-      setRenameTitle('')
-    } catch (e) {
-      console.error('Failed to rename book:', e)
     }
   }
 
@@ -439,8 +412,10 @@ export default function BookShelf({
               <BookCover
                 title={book.title}
                 onClick={() => onOpenBook(book.path)}
-                onDelete={() => setDeleteConfirm(book)}
-                onRename={() => handleRenameOpen(book)}
+                bookPath={book.path}
+                updatedTime={book.updated_time}
+                onDelete={() => removeBook(book.path)}
+                onRename={(newTitle) => changeBookName(book.path, newTitle)}
               />
               <Typography
                 variant="caption"
@@ -677,57 +652,6 @@ export default function BookShelf({
             variant="contained"
           >
             Save
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog
-        open={!!renameTarget}
-        onClose={() => setRenameTarget(null)}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle>Rename Book</DialogTitle>
-        <DialogContent>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="Book Title"
-            fullWidth
-            value={renameTitle}
-            onChange={(e) => setRenameTitle(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleRename()}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setRenameTarget(null)}>Cancel</Button>
-          <Button
-            onClick={handleRename}
-            variant="contained"
-            disabled={!renameTitle.trim()}
-          >
-            Rename
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog
-        open={!!deleteConfirm}
-        onClose={() => setDeleteConfirm(null)}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle>Delete Book</DialogTitle>
-        <DialogContent>
-          <Typography>
-            Are you sure you want to delete "{deleteConfirm?.title}"? This
-            action cannot be undone.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeleteConfirm(null)}>Cancel</Button>
-          <Button onClick={handleDelete} color="error" variant="contained">
-            Delete
           </Button>
         </DialogActions>
       </Dialog>
