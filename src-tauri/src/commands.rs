@@ -656,22 +656,22 @@ fn run_git_and_emit<F>(
             match rx.recv_timeout(std::time::Duration::from_secs(30)) {
                 Ok(Ok(msg)) => {
                     crate::logger::log_book_event(&app_handle, op_type, &format!("ok: {}", msg), &book_path_clone);
-                    let _ = app_handle.emit("git:done", serde_json::json!({"type": op_type, "ok": true, "message": msg}));
+                    let _ = app_handle.emit("git:done", serde_json::json!({"type": op_type, "ok": true, "message": msg, "book_path": book_path_clone}));
                 }
                 Ok(Err(e)) => {
                     crate::logger::log_book_event(&app_handle, op_type, &format!("failed: {}", e), &book_path_clone);
-                    let _ = app_handle.emit("git:done", serde_json::json!({"type": op_type, "ok": false, "message": e}));
+                    let _ = app_handle.emit("git:done", serde_json::json!({"type": op_type, "ok": false, "message": e, "book_path": book_path_clone}));
                 }
                 Err(_) => {
                     crate::logger::log_book_event(&app_handle, op_type, "timed out (30s)", &book_path_clone);
-                    let _ = app_handle.emit("git:done", serde_json::json!({"type": op_type, "ok": false, "message": "Operation timed out (30s)"}));
+                    let _ = app_handle.emit("git:done", serde_json::json!({"type": op_type, "ok": false, "message": "Operation timed out (30s)", "book_path": book_path_clone}));
                 }
             }
             let _ = handle.join();
         }));
         if result.is_err() {
             crate::logger::log_book_event(&app_handle, op_type, "crashed", &book_path_clone);
-            let _ = app_handle.emit("git:done", serde_json::json!({"type": op_type, "ok": false, "message": "Internal error: operation crashed"}));
+            let _ = app_handle.emit("git:done", serde_json::json!({"type": op_type, "ok": false, "message": "Internal error: operation crashed", "book_path": book_path_clone}));
         }
     });
 }

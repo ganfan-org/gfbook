@@ -32,14 +32,15 @@ import {
   renameBook,
 } from '../utils/commands'
 import type { LogEntry } from '../utils/commands'
-import type { Chapter } from '../types'
+import type { BookInfo, Chapter } from '../types'
 
 interface BookDetailProps {
-  bookPath: string
+  bookInfo: BookInfo
   onBack: () => void
 }
 
-export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
+export default function BookDetail({ bookInfo, onBack }: BookDetailProps) {
+  const bookPath = bookInfo.path
   const {
     meta,
     selectedChapterId,
@@ -374,7 +375,7 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
               <ArrowBackIcon />
             </IconButton>
             <Typography variant="h6" fontWeight={600} noWrap sx={{ flex: 1 }}>
-              {meta?.title || 'Loading...'}
+              {bookInfo.title}
             </Typography>
           </Box>
           <Divider />
@@ -535,8 +536,8 @@ export default function BookDetail({ bookPath, onBack }: BookDetailProps) {
           setSyncOutput('')
         }}
         bookPath={bookPath}
-        bookTitle={meta?.title || ''}
-        updatedTime={meta?.updated_time || 0}
+        bookTitle={bookInfo.title}
+        updatedTime={bookInfo.updated_time}
         onRename={async (title) => {
           await renameBook(bookPath, title)
           refreshMeta()

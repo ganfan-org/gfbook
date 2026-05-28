@@ -4,6 +4,7 @@ import FolderOpenIcon from '@mui/icons-material/FolderOpen'
 import {
   Box,
   Button,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -28,6 +29,7 @@ interface BookSettingsDialogProps {
   onRevealInFinder: () => void
   // Git tab
   gitStatusText?: string
+  gitLoading?: boolean
   commitMessage?: string
   setCommitMessage?: (s: string) => void
   onCommit?: () => Promise<void>
@@ -63,6 +65,7 @@ export default function BookSettingsDialog({
   onDelete,
   onRevealInFinder,
   gitStatusText = '',
+  gitLoading = false,
   commitMessage = '',
   setCommitMessage = () => {},
   onCommit = async () => {},
@@ -206,218 +209,243 @@ export default function BookSettingsDialog({
 
         {tab === 'git' && (
           <Box>
-            <Box display="flex" gap={1}>
-              {aheadBehind != null && aheadBehind[0] > 0 && (
-                <Box
-                  component="span"
-                  sx={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 0.2,
-                    color: 'warning.main',
-                    fontSize: '0.75rem',
-                  }}
-                >
-                  <ArrowUpwardIcon sx={{ fontSize: 12 }} />
-                  {aheadBehind[0]}
-                </Box>
-              )}
-              {aheadBehind != null && aheadBehind[1] > 0 && (
-                <Box
-                  component="span"
-                  sx={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 0.2,
-                    color: 'info.main',
-                    fontSize: '0.75rem',
-                  }}
-                >
-                  <ArrowDownwardIcon sx={{ fontSize: 12 }} />
-                  {aheadBehind[1]}
-                </Box>
-              )}
-            </Box>
-
-            <Divider sx={{ my: 1.5 }} />
-
-            <Typography variant="subtitle2" gutterBottom>
-              Changes
-            </Typography>
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              mb={1}
-              sx={{
-                fontFamily: 'monospace',
-                fontSize: '0.75rem',
-                whiteSpace: 'pre-wrap',
-              }}
-            >
-              {gitStatusText || 'No changes'}
-            </Typography>
-
-            {gitStatusText && (
-              <>
-                <TextField
-                  size="small"
-                  label="Commit Message"
-                  fullWidth
-                  multiline
-                  rows={2}
-                  value={commitMessage}
-                  onChange={(e) => setCommitMessage(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                      onCommit()
-                    }
-                  }}
-                  sx={{ mb: 1 }}
-                />
-                <Button
-                  onClick={onCommit}
-                  variant="contained"
-                  size="small"
-                  disabled={!commitMessage.trim()}
-                >
-                  Commit
-                </Button>
-              </>
-            )}
-
-            <Divider sx={{ my: 2 }} />
-
-            <Typography variant="subtitle2" gutterBottom>
-              Remote
-            </Typography>
-            {remoteUrl && (
-              <Typography
-                variant="caption"
-                color="text.secondary"
+            {gitLoading ? (
+              <Box
                 sx={{
-                  display: 'block',
-                  mb: 0.5,
-                  fontFamily: 'monospace',
-                  fontSize: '0.7rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                  py: 2,
+                  color: 'text.secondary',
                 }}
               >
-                {remoteUrl}
-              </Typography>
-            )}
-            <TextField
-              size="small"
-              fullWidth
-              placeholder="https://github.com/user/repo.git"
-              value={remoteDraft}
-              onChange={(e) => onRemoteDraftChange(e.target.value)}
-              sx={{ mb: 1 }}
-            />
-            <Box display="flex" gap={1} mb={1}>
-              <Button size="small" variant="outlined" onClick={onLoadRemote}>
-                Load
-              </Button>
-              <Button size="small" variant="outlined" onClick={onSetRemoteUrl}>
-                Set URL
-              </Button>
-            </Box>
-
-            <Box display="flex" gap={1} mb={1}>
-              <Button
-                size="small"
-                variant="outlined"
-                disabled={!!syncingType}
-                onClick={onFetch}
-              >
-                {syncingType === 'fetch' ? 'Fetching...' : 'Fetch'}
-              </Button>
-              <Button
-                size="small"
-                variant="outlined"
-                disabled={!!syncingType}
-                onClick={onPull}
-              >
-                {syncingType === 'pull' ? 'Pulling...' : 'Pull'}
-              </Button>
-              <Button
-                size="small"
-                variant="outlined"
-                disabled={!!syncingType}
-                onClick={onPush}
-              >
-                {syncingType === 'push' ? 'Pushing...' : 'Push'}
-              </Button>
-              <Button
-                size="small"
-                variant="outlined"
-                color="warning"
-                disabled={!!syncingType || mergeInProgress}
-                onClick={onMerge}
-              >
-                {mergeInProgress ? 'Merging...' : 'Merge'}
-              </Button>
-            </Box>
-
-            {conflictedFiles.length > 0 && (
-              <Box mt={1} mb={1}>
-                <Divider sx={{ my: 1 }} />
-                <Typography variant="subtitle2" color="error" gutterBottom>
-                  Conflicted Files
-                </Typography>
-                {conflictedFiles.map((file) => (
-                  <Box
-                    key={file}
-                    sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 1,
-                      py: 0.5,
-                    }}
-                  >
-                    <Typography
-                      variant="caption"
+                <CircularProgress size={16} />
+                <Typography variant="body2">Loading git data...</Typography>
+              </Box>
+            ) : (
+              <>
+                <Box display="flex" gap={1}>
+                  {aheadBehind != null && aheadBehind[0] > 0 && (
+                    <Box
+                      component="span"
                       sx={{
-                        flex: 1,
-                        fontFamily: 'monospace',
-                        fontSize: '0.65rem',
-                        wordBreak: 'break-all',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 0.2,
+                        color: 'warning.main',
+                        fontSize: '0.75rem',
                       }}
                     >
-                      {resolvedFiles.has(file) ? '✅ ' : ''}
-                      {file}
-                    </Typography>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      color="success"
-                      sx={{ fontSize: '0.6rem', minWidth: 70 }}
-                      onClick={() => onResolveFile(file, true)}
-                      disabled={resolvedFiles.has(file)}
+                      <ArrowUpwardIcon sx={{ fontSize: 12 }} />
+                      {aheadBehind[0]}
+                    </Box>
+                  )}
+                  {aheadBehind != null && aheadBehind[1] > 0 && (
+                    <Box
+                      component="span"
+                      sx={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 0.2,
+                        color: 'info.main',
+                        fontSize: '0.75rem',
+                      }}
                     >
-                      Remote
-                    </Button>
-                    <Button
+                      <ArrowDownwardIcon sx={{ fontSize: 12 }} />
+                      {aheadBehind[1]}
+                    </Box>
+                  )}
+                </Box>
+
+                <Divider sx={{ my: 1.5 }} />
+
+                <Typography variant="subtitle2" gutterBottom>
+                  Changes
+                </Typography>
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  mb={1}
+                  sx={{
+                    fontFamily: 'monospace',
+                    fontSize: '0.75rem',
+                    whiteSpace: 'pre-wrap',
+                  }}
+                >
+                  {gitStatusText || 'No changes'}
+                </Typography>
+
+                {gitStatusText && (
+                  <>
+                    <TextField
                       size="small"
-                      variant="outlined"
-                      color="warning"
-                      sx={{ fontSize: '0.6rem', minWidth: 70 }}
-                      onClick={() => onResolveFile(file, false)}
-                      disabled={resolvedFiles.has(file)}
+                      label="Commit Message"
+                      fullWidth
+                      multiline
+                      rows={2}
+                      value={commitMessage}
+                      onChange={(e) => setCommitMessage(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                          onCommit()
+                        }
+                      }}
+                      sx={{ mb: 1 }}
+                    />
+                    <Button
+                      onClick={onCommit}
+                      variant="contained"
+                      size="small"
+                      disabled={!commitMessage.trim()}
                     >
-                      Local
+                      Commit
                     </Button>
-                  </Box>
-                ))}
-                {conflictedFiles.every((f) => resolvedFiles.has(f)) && (
+                  </>
+                )}
+
+                <Divider sx={{ my: 2 }} />
+
+                <Typography variant="subtitle2" gutterBottom>
+                  Remote
+                </Typography>
+                {remoteUrl && (
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{
+                      display: 'block',
+                      mb: 0.5,
+                      fontFamily: 'monospace',
+                      fontSize: '0.7rem',
+                    }}
+                  >
+                    {remoteUrl}
+                  </Typography>
+                )}
+                <TextField
+                  size="small"
+                  fullWidth
+                  placeholder="https://github.com/user/repo.git"
+                  value={remoteDraft}
+                  onChange={(e) => onRemoteDraftChange(e.target.value)}
+                  sx={{ mb: 1 }}
+                />
+                <Box display="flex" gap={1} mb={1}>
                   <Button
                     size="small"
-                    variant="contained"
-                    sx={{ mt: 1 }}
-                    onClick={onCommitMerge}
+                    variant="outlined"
+                    onClick={onLoadRemote}
                   >
-                    Commit Merge
+                    Load
                   </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={onSetRemoteUrl}
+                  >
+                    Set URL
+                  </Button>
+                </Box>
+
+                <Box display="flex" gap={1} mb={1}>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    disabled={!!syncingType}
+                    onClick={onFetch}
+                  >
+                    {syncingType === 'fetch' ? 'Fetching...' : 'Fetch'}
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    disabled={!!syncingType}
+                    onClick={onPull}
+                  >
+                    {syncingType === 'pull' ? 'Pulling...' : 'Pull'}
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    disabled={!!syncingType}
+                    onClick={onPush}
+                  >
+                    {syncingType === 'push' ? 'Pushing...' : 'Push'}
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="warning"
+                    disabled={!!syncingType || mergeInProgress}
+                    onClick={onMerge}
+                  >
+                    {mergeInProgress ? 'Merging...' : 'Merge'}
+                  </Button>
+                </Box>
+
+                {conflictedFiles.length > 0 && (
+                  <Box mt={1} mb={1}>
+                    <Divider sx={{ my: 1 }} />
+                    <Typography variant="subtitle2" color="error" gutterBottom>
+                      Conflicted Files
+                    </Typography>
+                    {conflictedFiles.map((file) => (
+                      <Box
+                        key={file}
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 1,
+                          py: 0.5,
+                        }}
+                      >
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            flex: 1,
+                            fontFamily: 'monospace',
+                            fontSize: '0.65rem',
+                            wordBreak: 'break-all',
+                          }}
+                        >
+                          {resolvedFiles.has(file) ? '✅ ' : ''}
+                          {file}
+                        </Typography>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color="success"
+                          sx={{ fontSize: '0.6rem', minWidth: 70 }}
+                          onClick={() => onResolveFile(file, true)}
+                          disabled={resolvedFiles.has(file)}
+                        >
+                          Remote
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color="warning"
+                          sx={{ fontSize: '0.6rem', minWidth: 70 }}
+                          onClick={() => onResolveFile(file, false)}
+                          disabled={resolvedFiles.has(file)}
+                        >
+                          Local
+                        </Button>
+                      </Box>
+                    ))}
+                    {conflictedFiles.every((f) => resolvedFiles.has(f)) && (
+                      <Button
+                        size="small"
+                        variant="contained"
+                        sx={{ mt: 1 }}
+                        onClick={onCommitMerge}
+                      >
+                        Commit Merge
+                      </Button>
+                    )}
+                  </Box>
                 )}
-              </Box>
+              </>
             )}
           </Box>
         )}

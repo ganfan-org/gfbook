@@ -22,13 +22,23 @@ import {
   Divider,
 } from '@mui/material'
 import { open } from '@tauri-apps/plugin-dialog'
-import { useState, useEffect } from 'react'
+import { listen } from '@tauri-apps/api/event'
+import { useState, useEffect, useCallback } from 'react'
 import {
   getBooksDir,
   pathExists,
   readLogs,
   readBookLogs,
   revealInFinder,
+  gitStatus,
+  gitRemoteUrl,
+  gitAheadBehind,
+  gitCommit,
+  gitFetch,
+  gitPull,
+  gitPush,
+  attemptMerge,
+  resolveConflict,
 } from '../utils/commands'
 import { useBooks } from '../hooks/useBooks'
 import type { LogEntry } from '../utils/commands'
@@ -36,7 +46,7 @@ import type { BookInfo } from '../types'
 import BookSettingsDialog from '../components/BookSettingsDialog'
 
 interface BookShelfProps {
-  onOpenBook: (bookPath: string) => void
+  onOpenBook: (bookInfo: BookInfo) => void
   onToggleTheme: () => void
   mode: 'light' | 'dark'
 }
@@ -89,6 +99,9 @@ function BookCover({
   onRename,
   bookPath,
   updatedTime,
+  gitStatusText,
+  remoteUrl,
+  aheadBehind,
 }: {
   title: string
   onClick: () => void
@@ -96,9 +109,81 @@ function BookCover({
   onRename: (newTitle: string) => void
   bookPath: string
   updatedTime: number
+  gitStatusText: string
+  remoteUrl: string | null
+  aheadBehind: [number, number] | null
 }) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [primary, secondary] = hashColor(title)
+
+  // Git operation state
+  const [syncingType, setSyncingType] = useState<string | null>(null)
+  const [commitMessage, setCommitMessage] = useState('')
+  const [mergeInProgress, setMergeInProgress] = useState(false)
+  const [conflictedFiles, setConflictedFiles] = useState<string[]>([])
+  const [resolvedFiles, setResolvedFiles] = useState<Set<string>>(new Set())
+
+  // git:done listener for async operations
+  useEffect(() => {
+    const unlisten = listen<{
+      type: string
+      ok: boolean
+      message: string
+      book_path: string
+    }>('git:done', async (event) => {
+      if (event.payload.book_path !== bookPath) return
+      setSyncingType(null)
+      if (event.payload.type === 'merge') {
+        setMergeInProgress(false)
+        if (event.payload.ok) {
+          const msg = event.payload.message
+          if (msg.startsWith('conflicts:')) {
+            const files = msg.replace('conflicts:', '').split(',')
+            setConflictedFiles(files)
+            setResolvedFiles(new Set())
+          } else {
+            setConflictedFiles([])
+          }
+        }
+      } else if (!event.payload.ok) {
+        setSyncingType(null)
+      }
+    })
+    return () => {
+      unlisten.then((fn) => fn())
+    }
+  }, [bookPath])
+
+  const handleResolveFile = async (filePath: string, useTheirs: boolean) => {
+    try {
+      await resolveConflict(bookPath, filePath, useTheirs)
+      setResolvedFiles((prev) => new Set([...prev, filePath]))
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  const handleCommitMerge = async () => {
+    try {
+      await gitCommit(bookPath, 'Merge remote changes')
+      setConflictedFiles([])
+      setResolvedFiles(new Set())
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  const handleCommit = async () => {
+    if (!commitMessage.trim()) return
+    setSyncingType('commit')
+    try {
+      await gitCommit(bookPath, commitMessage.trim())
+      setCommitMessage('')
+    } catch (e) {
+      console.error(e)
+    }
+    setSyncingType(null)
+  }
 
   const initials = title
     .split(' ')
@@ -191,6 +276,36 @@ function BookCover({
             const entries = await readBookLogs(200, bookPath)
             return entries.reverse()
           }}
+          gitStatusText={gitStatusText}
+          commitMessage={commitMessage}
+          setCommitMessage={setCommitMessage}
+          onCommit={handleCommit}
+          remoteUrl={remoteUrl}
+          remoteDraft={remoteUrl || ''}
+          syncingType={syncingType}
+          mergeInProgress={mergeInProgress}
+          aheadBehind={aheadBehind}
+          conflictedFiles={conflictedFiles}
+          resolvedFiles={resolvedFiles}
+          onResolveFile={handleResolveFile}
+          onCommitMerge={handleCommitMerge}
+          onFetch={async () => {
+            setSyncingType('fetch')
+            await gitFetch(bookPath)
+          }}
+          onPull={async () => {
+            setSyncingType('pull')
+            await gitPull(bookPath)
+          }}
+          onPush={async () => {
+            setSyncingType('push')
+            await gitPush(bookPath)
+          }}
+          onMerge={async () => {
+            setMergeInProgress(true)
+            setSyncingType('merge')
+            await attemptMerge(bookPath)
+          }}
         />
       </Box>
       <CardContent sx={{ px: 1.5, py: 1, '&:last-child': { pb: 1 } }}>
@@ -223,6 +338,75 @@ export default function BookShelf({
   const [newFolderError, setNewFolderError] = useState('')
   const [newPathExists, setNewPathExists] = useState(false)
   const [newParentDir, setNewParentDir] = useState('')
+
+  // Git data cache for all books (loaded on mount)
+  const [gitDataMap, setGitDataMap] = useState<
+    Record<
+      string,
+      {
+        status: string
+        remote: string | null
+        aheadBehind: [number, number] | null
+      }
+    >
+  >({})
+
+  const loadAllGitData = useCallback(async () => {
+    const map: Record<string, (typeof gitDataMap)[string]> = {}
+    for (const book of books) {
+      try {
+        const [remote, status, ab] = await Promise.all([
+          gitRemoteUrl(book.path),
+          gitStatus(book.path),
+          gitAheadBehind(book.path),
+        ])
+        map[book.path] = { remote, status, aheadBehind: ab }
+      } catch {
+        /* git not available */
+      }
+    }
+    setGitDataMap(map)
+  }, [books])
+
+  useEffect(() => {
+    if (books.length > 0) {
+      loadAllGitData()
+    }
+  }, [loadAllGitData])
+
+  // Refresh git data for a specific book
+  const refreshBookGit = useCallback(async (bookPath: string) => {
+    try {
+      const [remote, status, ab] = await Promise.all([
+        gitRemoteUrl(bookPath),
+        gitStatus(bookPath),
+        gitAheadBehind(bookPath),
+      ])
+      setGitDataMap((prev) => ({
+        ...prev,
+        [bookPath]: { remote, status, aheadBehind: ab },
+      }))
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  // Git:done listener to refresh cache after async operations
+  useEffect(() => {
+    const unlisten = listen<{
+      type: string
+      ok: boolean
+      message: string
+      book_path: string
+    }>('git:done', async (event) => {
+      if (event.payload.ok) {
+        refreshBookGit(event.payload.book_path)
+      }
+    })
+    return () => {
+      unlisten.then((fn) => fn())
+    }
+  }, [refreshBookGit])
 
   const INVALID_FOLDER_CHARS = /[<>:"/\\|?*\x00-\x1f]/g
   const INVALID_FOLDER_NAMES = [
@@ -411,11 +595,14 @@ export default function BookShelf({
             <Box key={book.path}>
               <BookCover
                 title={book.title}
-                onClick={() => onOpenBook(book.path)}
+                onClick={() => onOpenBook(book)}
                 bookPath={book.path}
                 updatedTime={book.updated_time}
                 onDelete={() => removeBook(book.path)}
                 onRename={(newTitle) => changeBookName(book.path, newTitle)}
+                gitStatusText={gitDataMap[book.path]?.status || ''}
+                remoteUrl={gitDataMap[book.path]?.remote || null}
+                aheadBehind={gitDataMap[book.path]?.aheadBehind || null}
               />
               <Typography
                 variant="caption"
