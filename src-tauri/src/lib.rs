@@ -57,6 +57,7 @@ pub fn run() {
             path_exists,
             read_logs,
             read_book_logs,
+            start_search,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -38,3 +38,18 @@ pub struct CommitInfo {
     pub author: String,
     pub timestamp: u64,
 }
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SearchLine {
+    pub line: usize,
+    pub text: String,
+}
+
+pub fn flatten_chapters(chapters: &[Chapter]) -> Vec<&Chapter> {
+    let mut result = Vec::new();
+    for ch in chapters {
+        result.push(ch);
+        result.extend(flatten_chapters(&ch.chapters));
+    }
+    result
+}

@@ -4,6 +4,7 @@ import DarkModeIcon from '@mui/icons-material/DarkMode'
 import LightModeIcon from '@mui/icons-material/LightMode'
 import SettingsIcon from '@mui/icons-material/Settings'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
+import SearchIcon from '@mui/icons-material/Search'
 import {
   Box,
   Typography,
@@ -44,9 +45,10 @@ import { useBooks } from '../hooks/useBooks'
 import type { LogEntry } from '../utils/commands'
 import type { BookInfo } from '../types'
 import BookSettingsDialog from '../components/BookSettingsDialog'
+import SearchDialog from '../components/SearchDialog'
 
 interface BookShelfProps {
-  onOpenBook: (bookInfo: BookInfo) => void
+  onOpenBook: (bookInfo: BookInfo, chapterId?: string) => void
   onToggleTheme: () => void
   mode: 'light' | 'dark'
 }
@@ -455,6 +457,7 @@ export default function BookShelf({
   const [globalGitEmail, setGlobalGitEmail] = useState('')
   const [globalProxy, setGlobalProxy] = useState('')
   const [logs, setLogs] = useState<LogEntry[]>([])
+  const [searchOpen, setSearchOpen] = useState(false)
 
   const handleCreate = async () => {
     if (!newTitle.trim()) return
@@ -543,6 +546,9 @@ export default function BookShelf({
           >
             New Book
           </Button>
+          <IconButton onClick={() => setSearchOpen(true)}>
+            <SearchIcon />
+          </IconButton>
           <IconButton onClick={onToggleTheme}>
             {mode === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
           </IconButton>
@@ -842,6 +848,17 @@ export default function BookShelf({
           </Button>
         </DialogActions>
       </Dialog>
+
+      <SearchDialog
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        bookPaths={books.map((b) => b.path)}
+        onSelectChapter={(bookPath, chapterId) => {
+          const book = books.find((b) => b.path === bookPath)
+          if (book) onOpenBook(book, chapterId)
+          setSearchOpen(false)
+        }}
+      />
     </Box>
   )
 }

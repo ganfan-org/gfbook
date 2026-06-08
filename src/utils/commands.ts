@@ -236,3 +236,23 @@ export function readBookLogs(
 ): Promise<LogEntry[]> {
   return invoke('read_book_logs', { limit, bookPath })
 }
+
+export interface SearchMatch {
+  line: number
+  text: string
+}
+
+export interface SearchProgressEvent {
+  book_path: string
+  book_title: string
+  chapter_id: string
+  chapter_title: string
+  matches: SearchMatch[]
+}
+
+export function startSearch(
+  bookPaths: string[],
+  query: string,
+): Promise<string> {
+  return invoke('start_search', { bookPaths, query })
+}

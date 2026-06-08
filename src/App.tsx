@@ -37,6 +37,7 @@ function App() {
   const prefersDark = useMediaQuery('(prefers-color-scheme: dark)')
   const [mode, setMode] = useState<'light' | 'dark'>('light')
   const [currentBook, setCurrentBook] = useState<BookInfo | null>(null)
+  const [pendingChapterId, setPendingChapterId] = useState<string | null>(null)
   const bookPathRef = useRef(currentBook?.path ?? null)
   bookPathRef.current = currentBook?.path ?? null
 
@@ -90,11 +91,18 @@ function App() {
       {currentBook ? (
         <BookDetail
           bookInfo={currentBook}
-          onBack={() => setCurrentBook(null)}
+          initialChapterId={pendingChapterId}
+          onBack={() => {
+            setCurrentBook(null)
+            setPendingChapterId(null)
+          }}
         />
       ) : (
         <BookShelf
-          onOpenBook={(bookInfo) => setCurrentBook(bookInfo)}
+          onOpenBook={(bookInfo, chapterId) => {
+            setCurrentBook(bookInfo)
+            setPendingChapterId(chapterId ?? null)
+          }}
           onToggleTheme={toggleTheme}
           mode={mode}
         />

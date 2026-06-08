@@ -3,6 +3,7 @@ import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 import SettingsIcon from '@mui/icons-material/Settings'
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'
+import SearchIcon from '@mui/icons-material/Search'
 import {
   Box,
   Typography,
@@ -21,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ChapterEditor from '../components/ChapterEditor'
 import ChapterTree from '../components/ChapterTree'
 import BookSettingsDialog from '../components/BookSettingsDialog'
+import SearchDialog from '../components/SearchDialog'
 import { useBook } from '../hooks/useBook'
 import {
   revealInFinder,
@@ -36,10 +38,15 @@ import type { BookInfo, Chapter } from '../types'
 
 interface BookDetailProps {
   bookInfo: BookInfo
+  initialChapterId?: string | null
   onBack: () => void
 }
 
-export default function BookDetail({ bookInfo, onBack }: BookDetailProps) {
+export default function BookDetail({
+  bookInfo,
+  initialChapterId,
+  onBack,
+}: BookDetailProps) {
   const bookPath = bookInfo.path
   const {
     meta,
@@ -85,6 +92,7 @@ export default function BookDetail({ bookInfo, onBack }: BookDetailProps) {
   const [resolvedFiles, setResolvedFiles] = useState<Set<string>>(new Set())
   const [mergeInProgress, setMergeInProgress] = useState(false)
   const [logs, setLogs] = useState<LogEntry[]>([])
+  const [searchOpen, setSearchOpen] = useState(false)
 
   const refreshLogs = useCallback(async () => {
     try {
@@ -106,6 +114,13 @@ export default function BookDetail({ bookInfo, onBack }: BookDetailProps) {
       setAheadBehind(null)
     }
   }, [bookPath, getAheadBehind])
+
+  // Select initial chapter from search result
+  useEffect(() => {
+    if (initialChapterId && selectChapter) {
+      selectChapter(initialChapterId)
+    }
+  }, [initialChapterId, selectChapter])
 
   const handleAttemptMerge = useCallback(async () => {
     if (!bookPath) return
@@ -374,6 +389,9 @@ export default function BookDetail({ bookInfo, onBack }: BookDetailProps) {
             <IconButton onClick={onBack} size="small">
               <ArrowBackIcon />
             </IconButton>
+            <IconButton onClick={() => setSearchOpen(true)} size="small">
+              <SearchIcon />
+            </IconButton>
             <Typography variant="h6" fontWeight={600} noWrap sx={{ flex: 1 }}>
               {bookInfo.title}
             </Typography>
@@ -620,6 +638,16 @@ export default function BookDetail({ bookInfo, onBack }: BookDetailProps) {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <SearchDialog
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        bookPaths={[bookPath]}
+        onSelectChapter={(_bookPath, chapterId) => {
+          selectChapter(chapterId)
+          setSearchOpen(false)
+        }}
+      />
     </Box>
   )
 }

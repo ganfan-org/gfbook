@@ -5,7 +5,7 @@ use tauri::{Emitter, Manager};
 use uuid::Uuid;
 
 use crate::git;
-use crate::models::{BookInfo, BookMeta, Chapter, CommitInfo};
+use crate::models::{BookInfo, BookMeta, Chapter, CommitInfo, flatten_chapters};
 
 const META_FILE: &str = "gtbook.yaml";
 const CHAPTERS_DIR: &str = "chapters";
@@ -1019,4 +1019,63 @@ pub fn read_book_logs(
     app_handle: tauri::AppHandle,
 ) -> Vec<serde_json::Value> {
     crate::logger::read_book_logs(&app_handle, limit, &book_path)
+}
+
+#[tauri::command]
+pub fn start_search(
+    book_paths: Vec<String>,
+    query: String,
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
+    std::thread::spawn(move || {
+        for book_path in &book_paths {
+            // Read meta
+            let meta = match load_meta(book_path) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            for chapter in flatten_chapters(&meta.chapters) {
+                let query_lower = query.to_lowercase();
+                let mut matches = Vec::new();
+
+                // Check chapter title
+                if chapter.title.to_lowercase().contains(&query_lower) {
+                    matches.push(crate::models::SearchLine {
+                        line: 0,
+                        text: format!("# {}", chapter.title),
+                    });
+                }
+
+                // Check content
+                let file_path = chapter_file_path(book_path, &chapter.id);
+                if file_path.exists() {
+                    if let Ok(content) = std::fs::read_to_string(&file_path) {
+                        for (line_no, line) in content.lines().enumerate() {
+                            if line.to_lowercase().contains(&query_lower) {
+                                matches.push(crate::models::SearchLine {
+                                    line: line_no + 1,
+                                    text: line.trim().to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+
+                if !matches.is_empty() {
+                    let _ = app_handle.emit(
+                        "search:progress",
+                        serde_json::json!({
+                            "book_path": book_path,
+                            "book_title": meta.title,
+                            "chapter_id": chapter.id,
+                            "chapter_title": chapter.title,
+                            "matches": matches,
+                        }),
+                    );
+                }
+            }
+        }
+        let _ = app_handle.emit("search:done", serde_json::json!({}));
+    });
+    Ok("started".to_string())
 }
