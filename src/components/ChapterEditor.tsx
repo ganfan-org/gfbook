@@ -207,7 +207,7 @@ function useTipTapEditor(
         }
         return false
       },
-      attributes: { class: 'gtbook-editor' },
+      attributes: { class: 'gfbook-editor' },
       transformPastedHTML: (html: string) =>
         html.replace(/<a\s[^>]*href="mailto:[^"]*"[^>]*>(.*?)<\/a>/gi, '$1'),
     }),

@@ -7,9 +7,9 @@ use uuid::Uuid;
 use crate::git;
 use crate::models::{BookInfo, BookMeta, Chapter, CommitInfo, flatten_chapters};
 
-const META_FILE: &str = "gtbook.yaml";
+const META_FILE: &str = "gfbook.yaml";
 const CHAPTERS_DIR: &str = "chapters";
-const CONFIG_FILE: &str = "gtbook-config.json";
+const CONFIG_FILE: &str = "gfbook-config.json";
 
 fn get_config_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     let data_dir = app_handle
@@ -42,7 +42,7 @@ fn default_books_dir() -> PathBuf {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join("gtbooks")
+    PathBuf::from(home).join("gfbooks")
 }
 
 fn read_book_list(app_handle: &tauri::AppHandle) -> Result<Vec<BookInfo>, String> {
@@ -358,7 +358,7 @@ pub fn import_book(folder_path: String, app_handle: tauri::AppHandle) -> Result<
     let meta_path = path.join(META_FILE);
     if !meta_path.exists() {
         return Err(format!(
-            "No gtbook.yaml found in '{}'",
+            "No gfbook.yaml found in '{}'",
             path.to_string_lossy()
         ));
     }

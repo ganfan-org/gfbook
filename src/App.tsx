@@ -43,7 +43,7 @@ function App() {
 
   useEffect(() => {
     try {
-      const saved = localStorage.getItem('gtbook-theme')
+      const saved = localStorage.getItem('gfbook-theme')
       if (saved === 'light' || saved === 'dark') {
         setMode(saved)
         return
@@ -56,7 +56,7 @@ function App() {
     setMode((m) => {
       const next = m === 'light' ? 'dark' : 'light'
       try {
-        localStorage.setItem('gtbook-theme', next)
+        localStorage.setItem('gfbook-theme', next)
       } catch {}
       return next
     })
