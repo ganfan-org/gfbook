@@ -13,6 +13,7 @@ import LooksTwoIcon from '@mui/icons-material/LooksTwo'
 import SuperscriptIcon from '@mui/icons-material/Superscript'
 import TableChartIcon from '@mui/icons-material/TableChart'
 import TextFieldsIcon from '@mui/icons-material/TextFields'
+import DeleteIcon from '@mui/icons-material/Delete'
 import { Box, IconButton, Tooltip } from '@mui/material'
 import type { Editor } from '@tiptap/core'
 
@@ -190,6 +191,224 @@ export default function EditorToolbar({
           <TableChartIcon fontSize="small" />
         </IconButton>
       </Tooltip>
+      {editor.isActive('table') && (
+        <>
+          <Tooltip title="Add row below">
+            <IconButton
+              size="small"
+              onClick={() => editor.chain().focus().addRowAfter().run()}
+            >
+              <Box
+                component="svg"
+                viewBox="0 0 20 20"
+                sx={{ width: 17, height: 17 }}
+              >
+                <rect
+                  x="2"
+                  y="3"
+                  width="14"
+                  height="2"
+                  rx="1"
+                  fill="currentColor"
+                  opacity="0.35"
+                />
+                <rect
+                  x="2"
+                  y="9"
+                  width="14"
+                  height="2"
+                  rx="1"
+                  fill="currentColor"
+                  opacity="0.35"
+                />
+                <rect
+                  x="2"
+                  y="15"
+                  width="14"
+                  height="2"
+                  rx="1"
+                  fill="currentColor"
+                />
+                <text
+                  x="16"
+                  y="17"
+                  fontSize="13"
+                  fill="currentColor"
+                  fontWeight="bold"
+                >
+                  +
+                </text>
+              </Box>
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Delete row">
+            <IconButton
+              size="small"
+              onClick={() => editor.chain().focus().deleteRow().run()}
+            >
+              <Box
+                component="svg"
+                viewBox="0 0 20 20"
+                sx={{ width: 17, height: 17 }}
+              >
+                <rect
+                  x="2"
+                  y="3"
+                  width="14"
+                  height="2"
+                  rx="1"
+                  fill="currentColor"
+                  opacity="0.35"
+                />
+                <rect
+                  x="2"
+                  y="9"
+                  width="14"
+                  height="2"
+                  rx="1"
+                  fill="currentColor"
+                />
+                <rect
+                  x="2"
+                  y="15"
+                  width="14"
+                  height="2"
+                  rx="1"
+                  fill="currentColor"
+                  opacity="0.35"
+                />
+                <line
+                  x1="15"
+                  y1="7"
+                  x2="9"
+                  y2="13"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
+                <line
+                  x1="9"
+                  y1="7"
+                  x2="15"
+                  y2="13"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
+              </Box>
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Add column after">
+            <IconButton
+              size="small"
+              onClick={() => editor.chain().focus().addColumnAfter().run()}
+            >
+              <Box
+                component="svg"
+                viewBox="0 0 20 20"
+                sx={{ width: 17, height: 17 }}
+              >
+                <rect
+                  x="3"
+                  y="2"
+                  width="2"
+                  height="14"
+                  rx="1"
+                  fill="currentColor"
+                  opacity="0.35"
+                />
+                <rect
+                  x="9"
+                  y="2"
+                  width="2"
+                  height="14"
+                  rx="1"
+                  fill="currentColor"
+                  opacity="0.35"
+                />
+                <rect
+                  x="15"
+                  y="2"
+                  width="2"
+                  height="14"
+                  rx="1"
+                  fill="currentColor"
+                />
+                <text
+                  x="16"
+                  y="8"
+                  fontSize="13"
+                  fill="currentColor"
+                  fontWeight="bold"
+                >
+                  +
+                </text>
+              </Box>
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Delete column">
+            <IconButton
+              size="small"
+              onClick={() => editor.chain().focus().deleteColumn().run()}
+            >
+              <Box
+                component="svg"
+                viewBox="0 0 20 20"
+                sx={{ width: 17, height: 17 }}
+              >
+                <rect
+                  x="3"
+                  y="2"
+                  width="2"
+                  height="14"
+                  rx="1"
+                  fill="currentColor"
+                  opacity="0.35"
+                />
+                <rect
+                  x="9"
+                  y="2"
+                  width="2"
+                  height="14"
+                  rx="1"
+                  fill="currentColor"
+                />
+                <rect
+                  x="15"
+                  y="2"
+                  width="2"
+                  height="14"
+                  rx="1"
+                  fill="currentColor"
+                  opacity="0.35"
+                />
+                <line
+                  x1="17"
+                  y1="7"
+                  x2="11"
+                  y2="13"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
+                <line
+                  x1="11"
+                  y1="7"
+                  x2="17"
+                  y2="13"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
+              </Box>
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Delete table">
+            <IconButton
+              size="small"
+              onClick={() => editor.chain().focus().deleteTable().run()}
+            >
+              <DeleteIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </>
+      )}
       <Box sx={{ flex: 1 }} />
       <Tooltip title="Table of contents">
         <IconButton

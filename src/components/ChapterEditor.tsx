@@ -14,8 +14,8 @@ import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
 import { Mathematics } from '@tiptap/extension-mathematics'
 import { Table } from '@tiptap/extension-table'
-import TableCell from '@tiptap/extension-table-cell'
-import TableHeader from '@tiptap/extension-table-header'
+import TableCellExtension from '@tiptap/extension-table-cell'
+import TableHeaderExtension from '@tiptap/extension-table-header'
 import TableRow from '@tiptap/extension-table-row'
 import { MarkdownManager } from '@tiptap/markdown'
 import { Box, Typography } from '@mui/material'
@@ -53,6 +53,81 @@ function stripMailtoLinks(node: any): any {
   return result
 }
 
+// Split inline content into text + hardBreak sequences for table cells
+// Handles \x1f (legacy format) and <br> separators
+function parseTableCellInline(tokens: any[], h: any) {
+  const inline = h.parseInline(tokens)
+  const result: any[] = []
+  for (const node of inline) {
+    if (node.type === 'text' && node.text) {
+      // Split by \x1f (legacy) or <br>
+      const parts = node.text.split(/[\x1f]|<br\s*\/?>/gi)
+      if (parts.length > 1) {
+        parts.forEach((part: string, i: number) => {
+          if (i > 0) result.push({ type: 'hardBreak' })
+          if (part) result.push({ ...node, text: part })
+        })
+      } else {
+        result.push(node)
+      }
+    } else {
+      result.push(node)
+    }
+  }
+  return result
+}
+
+const originalTableRender = (Table.config as any).renderMarkdown as any
+
+const CustomTable = Table.extend({
+  parseMarkdown(token: any, h: any) {
+    const rows: any[] = []
+    const alignments = Array.isArray(token.align) ? token.align : []
+    if (token.header) {
+      const headerCells: any[] = []
+      token.header.forEach((cell: any, index: number) => {
+        const align = cell.align || alignments[index]
+        const attrs = align ? { align } : {}
+        headerCells.push(
+          h.createNode('tableHeader', attrs, [
+            {
+              type: 'paragraph',
+              content: parseTableCellInline(cell.tokens, h),
+            },
+          ]),
+        )
+      })
+      rows.push(h.createNode('tableRow', {}, headerCells))
+    }
+    if (token.rows) {
+      token.rows.forEach((row: any) => {
+        const bodyCells: any[] = []
+        row.forEach((cell: any, index: number) => {
+          const align = cell.align || alignments[index]
+          const attrs = align ? { align } : {}
+          bodyCells.push(
+            h.createNode('tableCell', attrs, [
+              {
+                type: 'paragraph',
+                content: parseTableCellInline(cell.tokens, h),
+              },
+            ]),
+          )
+        })
+        rows.push(h.createNode('tableRow', {}, bodyCells))
+      })
+    }
+    return h.createNode('table', undefined, rows)
+  },
+  renderMarkdown(node: any, h: any, ctx?: any) {
+    if (!originalTableRender) return ''
+    return originalTableRender(node, h, ctx)
+      .replace(/\x1f/g, '<br>')
+      .replace(/^\n+/, '')
+      .replace(/\n+$/, '')
+  },
+})
+
 function useTipTapEditor(
   content: string,
   onContentChange: (markdown: string) => void,
@@ -66,6 +141,15 @@ function useTipTapEditor(
   const lastSavedRef = useRef('')
   const initializedRef = useRef(false)
   const bookPathRef = useRef(bookPath)
+  const prevContentRef = useRef(content)
+  const saveWithOldRef = useRef<((m: string) => void) | null>(null)
+
+  // Capture old save callback BEFORE it gets overwritten on chapter switch
+  if (content !== prevContentRef.current) {
+    saveWithOldRef.current = onChangeRef.current
+    prevContentRef.current = content
+  }
+
   onChangeRef.current = onContentChange
   bookPathRef.current = bookPath
 
@@ -96,10 +180,10 @@ function useTipTapEditor(
         }),
         Image,
         Mathematics.configure({ katexOptions: { throwOnError: false } }),
-        Table,
+        CustomTable,
         TableRow,
-        TableCell,
-        TableHeader,
+        TableCellExtension,
+        TableHeaderExtension,
       ]
       const doc = new MarkdownManager({ extensions: ext }).parse(content)
       // Strip mailto links from parsed content
@@ -120,10 +204,10 @@ function useTipTapEditor(
           }),
           Image,
           Mathematics.configure({ katexOptions: { throwOnError: false } }),
-          Table,
+          CustomTable,
           TableRow,
-          TableCell,
-          TableHeader,
+          TableCellExtension,
+          TableHeaderExtension,
         ],
       })
     }
@@ -137,10 +221,10 @@ function useTipTapEditor(
         link: { autolink: false, linkOnPaste: false, openOnClick: false },
       }),
       ImageWithAsset.configure({ inline: false }),
-      Table.configure({ resizable: true }),
+      CustomTable.configure({ resizable: true }),
       TableRow,
-      TableCell,
-      TableHeader,
+      TableCellExtension,
+      TableHeaderExtension,
       Mathematics.configure({
         katexOptions: { throwOnError: false },
         blockOptions: {
@@ -237,6 +321,18 @@ function useTipTapEditor(
       debounceRef.current = setTimeout(() => onChangeRef.current(markdown), 500)
     },
   })
+
+  // Force-save old content when switching chapters (runs during render, before editor update)
+  if (saveWithOldRef.current) {
+    if (editor && initializedRef.current) {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+      try {
+        const markdown = getSerializer().serialize(editor.getJSON())
+        saveWithOldRef.current(markdown)
+      } catch {}
+    }
+    saveWithOldRef.current = null
+  }
 
   // Resolve image assets to data URLs
   useEffect(() => {
