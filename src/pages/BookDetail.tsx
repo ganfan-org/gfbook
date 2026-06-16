@@ -92,6 +92,7 @@ export default function BookDetail({
   const [resolvedFiles, setResolvedFiles] = useState<Set<string>>(new Set())
   const [mergeInProgress, setMergeInProgress] = useState(false)
   const [logs, setLogs] = useState<LogEntry[]>([])
+  const [localTitle, setLocalTitle] = useState(bookInfo.title)
   const [searchOpen, setSearchOpen] = useState(false)
 
   const refreshLogs = useCallback(async () => {
@@ -393,7 +394,7 @@ export default function BookDetail({
               <SearchIcon />
             </IconButton>
             <Typography variant="h6" fontWeight={600} noWrap sx={{ flex: 1 }}>
-              {bookInfo.title}
+              {localTitle}
             </Typography>
           </Box>
           <Divider />
@@ -554,10 +555,11 @@ export default function BookDetail({
           setSyncOutput('')
         }}
         bookPath={bookPath}
-        bookTitle={bookInfo.title}
+        bookTitle={localTitle}
         updatedTime={bookInfo.updated_time}
         onRename={async (title) => {
           await renameBook(bookPath, title)
+          setLocalTitle(title)
           refreshMeta()
         }}
         onDelete={async () => {
