@@ -5,6 +5,23 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>gfbook</title>
+    <script>
+      // 防闪白（FOUC）：React 挂载前先设置主题，与 src/App.tsx 的
+      // readSavedMode()/systemMode() 逻辑保持一致，改动需两处同步
+      ;(function () {
+        var mode = null
+        try {
+          var saved = localStorage.getItem('gfbook-theme')
+          if (saved === 'light' || saved === 'dark') mode = saved
+        } catch (e) {}
+        if (!mode) {
+          mode = window.matchMedia('(prefers-color-scheme: dark)').matches
+            ? 'dark'
+            : 'light'
+        }
+        document.documentElement.setAttribute('data-theme', mode)
+      })()
+    </script>
     <link rel="stylesheet" href="/src/styles/tokens.css" />
   </head>
   <body>
