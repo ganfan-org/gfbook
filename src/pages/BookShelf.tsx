@@ -344,9 +344,6 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
     }
   }
 
-  const recentBooks = books.slice(0, 3)
-  const allBooks = books
-
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
@@ -381,33 +378,7 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
         </Box>
       </Box>
 
-      {/* 最近打开 */}
-      {recentBooks.length > 0 && (
-        <>
-          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 2, fontWeight: 500 }}>
-            最近打开
-          </Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3.5, mb: 4 }}>
-            {recentBooks.map(book => (
-              <BookCover
-                key={book.path}
-                title={book.title}
-                updatedTime={book.updated_time}
-                onClick={() => onOpenBook(book)}
-                onRename={newTitle => handleRename(book.path, newTitle)}
-                onDelete={() => handleDelete(book.path)}
-              />
-            ))}
-          </Box>
-        </>
-      )}
-
-      {/* 全部书 */}
-      <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 2, fontWeight: 500 }}>
-        全部书
-      </Typography>
-
-      {allBooks.length === 0 ? (
+      {books.length === 0 ? (
         <Box
           textAlign="center"
           py={12}
@@ -444,7 +415,7 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
         </Box>
       ) : (
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3.5, justifyContent: 'flex-start' }}>
-          {allBooks.map(book => (
+          {books.map(book => (
             <BookCover
               key={book.path}
               title={book.title}
