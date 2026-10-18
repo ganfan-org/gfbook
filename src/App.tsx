@@ -1,60 +1,50 @@
-import {
-  ThemeProvider,
-  createTheme,
-  CssBaseline,
-  useMediaQuery,
-} from '@mui/material'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { getCurrentWindow } from '@tauri-apps/api/window'
+import { ThemeProvider, CssBaseline } from '@mui/material'
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
 
 import BookDetail from './pages/BookDetail'
 import BookShelf from './pages/BookShelf'
+import { applyMode, buildTheme } from './theme/theme'
+import type { ThemeMode } from './theme/tokens'
 import type { BookInfo } from './types'
 
-const lightTheme = createTheme({
-  palette: {
-    mode: 'light',
-    primary: { main: '#1976d2' },
-    background: { default: '#f5f5f5' },
-  },
-  typography: {
-    fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif',
-  },
-})
+function readSavedMode(): ThemeMode | null {
+  try {
+    const saved = localStorage.getItem('gfbook-theme')
+    return saved === 'light' || saved === 'dark' ? saved : null
+  } catch {
+    return null
+  }
+}
 
-const darkTheme = createTheme({
-  palette: {
-    mode: 'dark',
-    primary: { main: '#90caf9' },
-    background: { default: '#121212' },
-  },
-  typography: {
-    fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif',
-  },
-})
+function systemMode(): ThemeMode {
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
 
 function App() {
-  const prefersDark = useMediaQuery('(prefers-color-scheme: dark)')
-  const [mode, setMode] = useState<'light' | 'dark'>('light')
+  const [mode, setMode] = useState<ThemeMode>(() => readSavedMode() ?? systemMode())
   const [currentBook, setCurrentBook] = useState<BookInfo | null>(null)
   const [pendingChapterId, setPendingChapterId] = useState<string | null>(null)
-  const bookPathRef = useRef(currentBook?.path ?? null)
-  bookPathRef.current = currentBook?.path ?? null
 
+  // 未手动选择过主题时跟随系统
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('gfbook-theme')
-      if (saved === 'light' || saved === 'dark') {
-        setMode(saved)
-        return
-      }
-    } catch {}
-    setMode(prefersDark ? 'dark' : 'light')
-  }, [prefersDark])
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = (e: MediaQueryListEvent) => {
+      if (readSavedMode() === null) setMode(e.matches ? 'dark' : 'light')
+    }
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+
+  // buildTheme 是纯函数，可安全用于 render；data-theme 副作用放 commit 阶段
+  const theme = useMemo(() => buildTheme(mode), [mode])
+
+  useLayoutEffect(() => {
+    applyMode(mode)
+  }, [mode])
 
   const toggleTheme = () => {
     setMode((m) => {
-      const next = m === 'light' ? 'dark' : 'light'
+      const next: ThemeMode = m === 'light' ? 'dark' : 'light'
       try {
         localStorage.setItem('gfbook-theme', next)
       } catch {}
@@ -62,31 +52,8 @@ function App() {
     })
   }
 
-  // Auto-commit on app close
-  useEffect(() => {
-    const unlisten = getCurrentWindow().onCloseRequested(async () => {
-      const path = bookPathRef.current
-      if (!path) return
-      try {
-        const { invoke } = await import('@tauri-apps/api/core')
-        const status: string = await invoke('git_status', { bookPath: path })
-        if (status.trim()) {
-          await invoke('git_commit', {
-            bookPath: path,
-            message: 'auto-save before close',
-          })
-        }
-      } catch (e) {
-        console.error('Auto-commit on close failed:', e)
-      }
-    })
-    return () => {
-      unlisten.then((fn) => fn())
-    }
-  }, [])
-
   return (
-    <ThemeProvider theme={mode === 'dark' ? darkTheme : lightTheme}>
+    <ThemeProvider theme={theme}>
       <CssBaseline />
       {currentBook ? (
         <BookDetail

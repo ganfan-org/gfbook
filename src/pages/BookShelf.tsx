@@ -5,71 +5,45 @@ import LightModeIcon from '@mui/icons-material/LightMode'
 import SettingsIcon from '@mui/icons-material/Settings'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import SearchIcon from '@mui/icons-material/Search'
+import DeleteIcon from '@mui/icons-material/Delete'
+import DriveFileRenameOutlineIcon from '@mui/icons-material/DriveFileRenameOutline'
+import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined'
 import {
   Box,
   Typography,
   Button,
   Card,
+  CardActionArea,
   CardContent,
+  CardMedia,
+  CircularProgress,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
   TextField,
   IconButton,
-  CircularProgress,
-  CardMedia,
-  CardActionArea,
-  Divider,
+  Menu,
+  MenuItem,
+  ListItemIcon,
 } from '@mui/material'
-import { open } from '@tauri-apps/plugin-dialog'
-import { listen } from '@tauri-apps/api/event'
-import { useState, useEffect, useCallback } from 'react'
-import {
-  getBooksDir,
-  pathExists,
-  readLogs,
-  readBookLogs,
-  revealInFinder,
-  gitStatus,
-  gitRemoteUrl,
-  gitAheadBehind,
-  gitCommit,
-  gitFetch,
-  gitPull,
-  gitPush,
-  attemptMerge,
-  resolveConflict,
-} from '../utils/commands'
+import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
+import { useState, useMemo } from 'react'
 import { useBooks } from '../hooks/useBooks'
-import type { LogEntry } from '../utils/commands'
 import type { BookInfo } from '../types'
-import BookSettingsDialog from '../components/BookSettingsDialog'
-import SearchDialog from '../components/SearchDialog'
 
-interface BookShelfProps {
-  onOpenBook: (bookInfo: BookInfo, chapterId?: string) => void
-  onToggleTheme: () => void
-  mode: 'light' | 'dark'
-}
-
-const COVER_COLORS = [
-  ['#4A90D9', '#357ABD'],
-  ['#D94A4A', '#BD3535'],
-  ['#5CB85C', '#449D44'],
-  ['#F0AD4E', '#EC971F'],
-  ['#9B59B6', '#8E44AD'],
-  ['#1ABC9C', '#16A085'],
-  ['#E67E22', '#D35400'],
-  ['#3498DB', '#2980B9'],
-  ['#E74C3C', '#C0392B'],
-  ['#2ECC71', '#27AE60'],
-  ['#F39C12', '#D68910'],
-  ['#2980B9', '#1A5276'],
-  ['#8E44AD', '#6C3483'],
-  ['#D35400', '#A04000'],
-  ['#16A085', '#0E6655'],
-  ['#27AE60', '#1E8449'],
+// ═══════════════════════════════════════════
+// 封面颜色 — 低饱和高级色
+// ═══════════════════════════════════════════
+const COVER_COLORS: [string, string][] = [
+  ['#E8E4E1', '#D5CFCA'],
+  ['#D4E2F0', '#B8C9D9'],
+  ['#DDE8D9', '#C8D6C2'],
+  ['#E8DED4', '#D8C8B8'],
+  ['#D8D4E8', '#C4BED9'],
+  ['#E8D4D4', '#D9BEBE'],
+  ['#E4E8D0', '#D4D9B8'],
+  ['#E0E8EA', '#C8D9DC'],
 ]
 
 function hashColor(title: string): [string, string] {
@@ -77,788 +51,443 @@ function hashColor(title: string): [string, string] {
   for (let i = 0; i < title.length; i++) {
     hash = title.charCodeAt(i) + ((hash << 5) - hash)
   }
-  const idx = Math.abs(hash) % COVER_COLORS.length
-  return COVER_COLORS[idx] as [string, string]
+  return COVER_COLORS[Math.abs(hash) % COVER_COLORS.length]
 }
 
 function formatDate(ts: number): string {
+  if (!ts || ts <= 0) return ''
   const d = new Date(ts)
   const now = new Date()
   const diff = now.getTime() - d.getTime()
-  if (diff < 24 * 60 * 60 * 1000) return 'Today'
-  if (diff < 48 * 60 * 60 * 1000) return 'Yesterday'
-  return d.toLocaleDateString('en-US', {
+  if (diff < 24 * 60 * 60 * 1000) return '今天'
+  if (diff < 48 * 60 * 60 * 1000) return '昨天'
+  return d.toLocaleDateString('zh-CN', {
     month: 'short',
     day: 'numeric',
-    year: 'numeric',
+    year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric',
   })
 }
 
+// ═══════════════════════════════════════════
+// BookCover 组件 — Apple 风格低饱和封面
+// ═══════════════════════════════════════════
 function BookCover({
   title,
-  onClick,
-  onDelete,
-  onRename,
-  bookPath,
   updatedTime,
-  gitStatusText,
-  remoteUrl,
-  aheadBehind,
+  onClick,
+  onRename,
+  onDelete,
 }: {
   title: string
-  onClick: () => void
-  onDelete: () => void
-  onRename: (newTitle: string) => void
-  bookPath: string
   updatedTime: number
-  gitStatusText: string
-  remoteUrl: string | null
-  aheadBehind: [number, number] | null
+  onClick: () => void
+  onRename: (t: string) => void
+  onDelete: () => void
 }) {
-  const [dialogOpen, setDialogOpen] = useState(false)
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
+  const [menuHover, setMenuHover] = useState(false)
+  const [renameOpen, setRenameOpen] = useState(false)
+  const [renameValue, setRenameValue] = useState(title)
   const [primary, secondary] = hashColor(title)
 
-  // Git operation state
-  const [syncingType, setSyncingType] = useState<string | null>(null)
-  const [commitMessage, setCommitMessage] = useState('')
-  const [mergeInProgress, setMergeInProgress] = useState(false)
-  const [conflictedFiles, setConflictedFiles] = useState<string[]>([])
-  const [resolvedFiles, setResolvedFiles] = useState<Set<string>>(new Set())
+  const isLight = useMemo(() => {
+    const hex = primary.replace('#', '')
+    const r = parseInt(hex.slice(0, 2), 16)
+    const g = parseInt(hex.slice(2, 4), 16)
+    const b = parseInt(hex.slice(4, 6), 16)
+    return (r * 299 + g * 587 + b * 114) / 1000 > 160
+  }, [primary])
 
-  // git:done listener for async operations
-  useEffect(() => {
-    const unlisten = listen<{
-      type: string
-      ok: boolean
-      message: string
-      book_path: string
-    }>('git:done', async (event) => {
-      if (event.payload.book_path !== bookPath) return
-      setSyncingType(null)
-      if (event.payload.type === 'merge') {
-        setMergeInProgress(false)
-        if (event.payload.ok) {
-          const msg = event.payload.message
-          if (msg.startsWith('conflicts:')) {
-            const files = msg.replace('conflicts:', '').split(',')
-            setConflictedFiles(files)
-            setResolvedFiles(new Set())
-          } else {
-            setConflictedFiles([])
-          }
-        }
-      } else if (!event.payload.ok) {
-        setSyncingType(null)
-      }
-    })
-    return () => {
-      unlisten.then((fn) => fn())
-    }
-  }, [bookPath])
+  const textColor = isLight ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.95)'
+  const mutedColor = isLight ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.55)'
 
-  const handleResolveFile = async (filePath: string, useTheirs: boolean) => {
-    try {
-      await resolveConflict(bookPath, filePath, useTheirs)
-      setResolvedFiles((prev) => new Set([...prev, filePath]))
-    } catch (e) {
-      console.error(e)
-    }
-  }
-
-  const handleCommitMerge = async () => {
-    try {
-      await gitCommit(bookPath, 'Merge remote changes')
-      setConflictedFiles([])
-      setResolvedFiles(new Set())
-    } catch (e) {
-      console.error(e)
-    }
-  }
-
-  const handleCommit = async () => {
-    if (!commitMessage.trim()) return
-    setSyncingType('commit')
-    try {
-      await gitCommit(bookPath, commitMessage.trim())
-      setCommitMessage('')
-    } catch (e) {
-      console.error(e)
-    }
-    setSyncingType(null)
-  }
-
-  const initials = title
-    .split(' ')
-    .map((w) => w[0])
-    .join('')
-    .slice(0, 3)
-    .toUpperCase()
+  const initials = useMemo(() => {
+    const cjk = /[\u4e00-\u9fff]/.test(title)
+    if (cjk) return title.slice(0, 2)
+    return title.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+  }, [title])
 
   return (
-    <Card
-      sx={{
-        width: 180,
-        flexShrink: 0,
-        borderRadius: 2,
-        boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
-        transition: 'transform 0.15s, box-shadow 0.15s',
-        '&:hover': {
-          transform: 'translateY(-4px)',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-        },
-      }}
-    >
-      <Box sx={{ position: 'relative' }}>
-        <CardActionArea onClick={onClick}>
-          <CardMedia
-            sx={{
-              height: 240,
-              background: `linear-gradient(135deg, ${primary}, ${secondary})`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexDirection: 'column',
-              p: 2,
-            }}
-          >
-            <Typography
-              variant="h6"
+    <>
+      <Card
+        sx={{
+          width: 158,
+          flexShrink: 0,
+          borderRadius: 3,
+          boxShadow: 'none',
+          border: '1px solid',
+          borderColor: 'divider',
+          bgcolor: 'transparent',
+          transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+          '&:hover': {
+            transform: 'translateY(-3px)',
+            boxShadow: 'var(--shadow-lg)',
+          },
+        }}
+        onMouseEnter={() => setMenuHover(true)}
+        onMouseLeave={() => setMenuHover(false)}
+      >
+        <Box sx={{ position: 'relative' }}>
+          <CardActionArea onClick={onClick} sx={{ borderRadius: '12px 12px 0 0' }}>
+            <CardMedia
               sx={{
-                color: 'rgba(255,255,255,0.15)',
-                fontSize: '3rem',
-                fontWeight: 800,
-                letterSpacing: 2,
-                lineHeight: 1,
-                mb: 1,
+                height: 210,
+                background: `linear-gradient(145deg, ${primary}, ${secondary})`,
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                p: 2,
+                position: 'relative',
+                overflow: 'hidden',
+                '&::before': {
+                  content: '""',
+                  position: 'absolute',
+                  inset: 0,
+                  background:
+                    'linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(0,0,0,0.03) 100%)',
+                },
               }}
             >
-              {initials}
-            </Typography>
-          </CardMedia>
-        </CardActionArea>
-        <IconButton
-          size="small"
-          onClick={(e) => {
-            e.stopPropagation()
-            setDialogOpen(true)
-          }}
-          sx={(t) => ({
-            position: 'absolute',
-            top: 4,
-            right: 4,
-            bgcolor:
-              t.palette.mode === 'dark'
-                ? 'rgba(0,0,0,0.7)'
-                : 'rgba(255,255,255,0.9)',
-            '&:hover': {
-              bgcolor: t.palette.mode === 'dark' ? 'rgba(0,0,0,0.9)' : 'white',
-            },
-            width: 28,
-            height: 28,
-          })}
-        >
-          <MoreVertIcon sx={{ fontSize: 16 }} />
-        </IconButton>
-        <BookSettingsDialog
-          open={dialogOpen}
-          onClose={() => setDialogOpen(false)}
-          bookPath={bookPath}
-          bookTitle={title}
-          updatedTime={updatedTime}
-          onRename={async (newTitle: string) => {
-            onRename(newTitle)
-            setDialogOpen(false)
-          }}
-          onDelete={async () => {
-            onDelete()
-            setDialogOpen(false)
-          }}
-          onRevealInFinder={() => revealInFinder(bookPath)}
-          onRefreshLogs={async () => {
-            const entries = await readBookLogs(200, bookPath)
-            return entries.reverse()
-          }}
-          gitStatusText={gitStatusText}
-          commitMessage={commitMessage}
-          setCommitMessage={setCommitMessage}
-          onCommit={handleCommit}
-          remoteUrl={remoteUrl}
-          remoteDraft={remoteUrl || ''}
-          syncingType={syncingType}
-          mergeInProgress={mergeInProgress}
-          aheadBehind={aheadBehind}
-          conflictedFiles={conflictedFiles}
-          resolvedFiles={resolvedFiles}
-          onResolveFile={handleResolveFile}
-          onCommitMerge={handleCommitMerge}
-          onFetch={async () => {
-            setSyncingType('fetch')
-            await gitFetch(bookPath)
-          }}
-          onPull={async () => {
-            setSyncingType('pull')
-            await gitPull(bookPath)
-          }}
-          onPush={async () => {
-            setSyncingType('push')
-            await gitPush(bookPath)
-          }}
-          onMerge={async () => {
-            setMergeInProgress(true)
-            setSyncingType('merge')
-            await attemptMerge(bookPath)
-          }}
-        />
-      </Box>
-      <CardContent sx={{ px: 1.5, py: 1, '&:last-child': { pb: 1 } }}>
-        <Typography variant="body2" fontWeight={600} noWrap sx={{ mb: 0.25 }}>
-          {title}
-        </Typography>
-      </CardContent>
-    </Card>
+              <Typography
+                sx={{
+                  color: mutedColor,
+                  fontSize: '2.25rem',
+                  fontWeight: 700,
+                  letterSpacing: 1,
+                  lineHeight: 1,
+                  opacity: 0.35,
+                  alignSelf: 'flex-end',
+                  position: 'relative',
+                  zIndex: 1,
+                }}
+              >
+                {initials}
+              </Typography>
+              <Box sx={{ position: 'relative', zIndex: 1, mt: 'auto' }}>
+                <Typography
+                  sx={{
+                    color: textColor,
+                    fontWeight: 600,
+                    fontSize: '0.95rem',
+                    lineHeight: 1.3,
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    textShadow: isLight
+                      ? '0 1px 2px rgba(255,255,255,0.3)'
+                      : '0 1px 3px rgba(0,0,0,0.2)',
+                  }}
+                >
+                  {title}
+                </Typography>
+              </Box>
+            </CardMedia>
+          </CardActionArea>
+
+          <IconButton
+            size="small"
+            onClick={e => {
+              e.stopPropagation()
+              setMenuAnchor(e.currentTarget)
+            }}
+            sx={t => ({
+              position: 'absolute',
+              top: 6,
+              right: 6,
+              width: 26,
+              height: 26,
+              opacity: menuHover ? 1 : 0,
+              transition: 'opacity 0.2s ease',
+              bgcolor:
+                t.palette.mode === 'dark'
+                  ? 'rgba(0,0,0,0.5)'
+                  : 'rgba(255,255,255,0.75)',
+              color: 'text.primary',
+              backdropFilter: 'blur(6px)',
+              '&:hover': {
+                bgcolor:
+                  t.palette.mode === 'dark'
+                    ? 'rgba(0,0,0,0.7)'
+                    : 'rgba(255,255,255,0.95)',
+              },
+            })}
+          >
+            <MoreVertIcon sx={{ fontSize: 15 }} />
+          </IconButton>
+        </Box>
+        <CardContent sx={{ px: 2, py: 1.25, '&:last-child': { pb: 1.25 } }}>
+          <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.75rem' }}>
+            {formatDate(updatedTime)}
+          </Typography>
+        </CardContent>
+      </Card>
+
+      {/* 右键菜单 */}
+      <Menu
+        anchorEl={menuAnchor}
+        open={!!menuAnchor}
+        onClose={() => setMenuAnchor(null)}
+        onClick={e => e.stopPropagation()}
+      >
+        <MenuItem onClick={() => { setMenuAnchor(null); setRenameOpen(true); setRenameValue(title) }}>
+          <ListItemIcon><DriveFileRenameOutlineIcon fontSize="small" /></ListItemIcon>
+          重命名
+        </MenuItem>
+        <MenuItem onClick={() => { setMenuAnchor(null); onDelete() }}>
+          <ListItemIcon><DeleteIcon fontSize="small" color="error" /></ListItemIcon>
+          <Typography color="error" variant="body2">删除</Typography>
+        </MenuItem>
+        <MenuItem onClick={() => { setMenuAnchor(null) }}>
+          <ListItemIcon><FolderOpenOutlinedIcon fontSize="small" /></ListItemIcon>
+          在 Finder 中显示
+        </MenuItem>
+      </Menu>
+
+      {/* 重命名弹窗 */}
+      <Dialog open={renameOpen} onClose={() => setRenameOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>重命名</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="书名"
+            fullWidth
+            value={renameValue}
+            onChange={e => setRenameValue(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                onRename(renameValue.trim())
+                setRenameOpen(false)
+              }
+            }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRenameOpen(false)}>取消</Button>
+          <Button
+            onClick={() => { onRename(renameValue.trim()); setRenameOpen(false) }}
+            variant="contained"
+            disabled={!renameValue.trim() || renameValue.trim() === title}
+          >
+            确认
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
   )
 }
 
-export default function BookShelf({
-  onOpenBook,
-  onToggleTheme,
-  mode,
-}: BookShelfProps) {
-  const {
-    books,
-    loading,
-    createBook,
-    removeBook,
-    changeBookName,
-    importExternalBook,
-    getGlobalSettings,
-    setGlobalSettings,
-  } = useBooks()
+// ═══════════════════════════════════════════
+// 书架主页面
+// ═══════════════════════════════════════════
+interface BookShelfProps {
+  onOpenBook: (book: BookInfo, chapterId?: string) => void
+  onToggleTheme: () => void
+  mode: 'light' | 'dark'
+}
+
+export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelfProps) {
+  const { books, loading, refresh, createBook, removeBook, changeBookName, importExternalBook } = useBooks()
   const [newDialogOpen, setNewDialogOpen] = useState(false)
   const [newTitle, setNewTitle] = useState('')
-  const [newFolderName, setNewFolderName] = useState('')
-  const [newFolderError, setNewFolderError] = useState('')
-  const [newPathExists, setNewPathExists] = useState(false)
-  const [newParentDir, setNewParentDir] = useState('')
-
-  // Git data cache for all books (loaded on mount)
-  const [gitDataMap, setGitDataMap] = useState<
-    Record<
-      string,
-      {
-        status: string
-        remote: string | null
-        aheadBehind: [number, number] | null
-      }
-    >
-  >({})
-
-  const loadAllGitData = useCallback(async () => {
-    const map: Record<string, (typeof gitDataMap)[string]> = {}
-    for (const book of books) {
-      try {
-        const [remote, status, ab] = await Promise.all([
-          gitRemoteUrl(book.path),
-          gitStatus(book.path),
-          gitAheadBehind(book.path),
-        ])
-        map[book.path] = { remote, status, aheadBehind: ab }
-      } catch {
-        /* git not available */
-      }
-    }
-    setGitDataMap(map)
-  }, [books])
-
-  useEffect(() => {
-    if (books.length > 0) {
-      loadAllGitData()
-    }
-  }, [loadAllGitData])
-
-  // Refresh git data for a specific book
-  const refreshBookGit = useCallback(async (bookPath: string) => {
-    try {
-      const [remote, status, ab] = await Promise.all([
-        gitRemoteUrl(bookPath),
-        gitStatus(bookPath),
-        gitAheadBehind(bookPath),
-      ])
-      setGitDataMap((prev) => ({
-        ...prev,
-        [bookPath]: { remote, status, aheadBehind: ab },
-      }))
-    } catch {
-      /* ignore */
-    }
-  }, [])
-
-  // Git:done listener to refresh cache after async operations
-  useEffect(() => {
-    const unlisten = listen<{
-      type: string
-      ok: boolean
-      message: string
-      book_path: string
-    }>('git:done', async (event) => {
-      if (event.payload.ok) {
-        refreshBookGit(event.payload.book_path)
-      }
-    })
-    return () => {
-      unlisten.then((fn) => fn())
-    }
-  }, [refreshBookGit])
-
-  const INVALID_FOLDER_CHARS = /[<>:"/\\|?*\x00-\x1f]/g
-  const INVALID_FOLDER_NAMES = [
-    '',
-    '.',
-    '..',
-    'CON',
-    'PRN',
-    'AUX',
-    'NUL',
-    'COM1',
-    'COM2',
-    'COM3',
-    'COM4',
-    'COM5',
-    'COM6',
-    'COM7',
-    'COM8',
-    'COM9',
-    'LPT1',
-    'LPT2',
-    'LPT3',
-    'LPT4',
-    'LPT5',
-    'LPT6',
-    'LPT7',
-    'LPT8',
-    'LPT9',
-  ]
-
-  function validateFolderName(name: string): string {
-    if (!name.trim()) return 'Folder name is required'
-    if (INVALID_FOLDER_CHARS.test(name))
-      return 'Folder name cannot contain: < > : " / \\ | ? *'
-    if (name.startsWith('.') || name.endsWith('.'))
-      return 'Folder name cannot start or end with a dot'
-    if (name.endsWith(' ') || name.endsWith('.'))
-      return 'Folder name cannot end with space or dot'
-    if (INVALID_FOLDER_NAMES.includes(name.toUpperCase()))
-      return `"${name}" is not allowed as a folder name`
-    if (name.length > 255) return 'Folder name is too long (max 255 characters)'
-    return ''
-  }
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [globalGitName, setGlobalGitName] = useState('')
-  const [globalGitEmail, setGlobalGitEmail] = useState('')
-  const [globalProxy, setGlobalProxy] = useState('')
-  const [logs, setLogs] = useState<LogEntry[]>([])
+  const [creating, setCreating] = useState(false)
+  const [deletingPath, setDeletingPath] = useState<string | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
 
-  const handleCreate = async () => {
-    if (!newTitle.trim()) return
+  const handleNewBook = async () => {
+    const title = newTitle.trim()
+    if (!title || creating) return
     try {
-      const bookDir = `${newParentDir}/${newFolderName}`
-      await createBook(newTitle.trim(), bookDir)
-      setNewDialogOpen(false)
+      setCreating(true)
+      await createBook(title)
       setNewTitle('')
+      setNewDialogOpen(false)
     } catch (e) {
       console.error('Failed to create book:', e)
+    } finally {
+      setCreating(false)
     }
   }
 
-  useEffect(() => {
-    if (newDialogOpen) {
-      getBooksDir().then((dir) => {
-        setNewParentDir(dir)
-        setNewFolderName('')
-        setNewTitle('')
-        setNewPathExists(false)
-      })
+  const handleDelete = async (path: string) => {
+    if (deletingPath) return
+    try {
+      setDeletingPath(path)
+      await removeBook(path)
+    } catch (e) {
+      console.error('Failed to delete book:', e)
+    } finally {
+      setDeletingPath(null)
     }
-  }, [newDialogOpen])
+  }
 
-  // Check if the target path already exists
-  useEffect(() => {
-    if (!newFolderName.trim() || !newParentDir.trim()) return
-    const fullPath = `${newParentDir}/${newFolderName}`
-    pathExists(fullPath).then(setNewPathExists)
-  }, [newFolderName, newParentDir])
+  const handleRename = async (path: string, title: string) => {
+    if (!title) return
+    try {
+      await changeBookName(path, title)
+    } catch (e) {
+      console.error('Failed to rename book:', e)
+    }
+  }
 
   const handleImport = async () => {
-    console.log('[BookShelf] Open Book clicked')
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: 'Select book folder',
-    })
-    console.log('[BookShelf] dialog returned:', selected)
-    if (selected) {
-      try {
-        const result = await importExternalBook(selected)
-        console.log('[BookShelf] import success:', result)
-      } catch (e) {
-        console.error('[BookShelf] Failed to import book:', e)
+    try {
+      const selected = await dialogOpen({ directory: true, multiple: false })
+      if (typeof selected === 'string') {
+        await importExternalBook(selected)
       }
+    } catch (e) {
+      console.error('Failed to import book:', e)
     }
   }
+
+  const recentBooks = books.slice(0, 3)
+  const allBooks = books
 
   if (loading) {
     return (
-      <Box
-        display="flex"
-        justifyContent="center"
-        alignItems="center"
-        minHeight="100vh"
-      >
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
         <CircularProgress />
       </Box>
     )
   }
 
   return (
-    <Box sx={{ maxWidth: 1200, mx: 'auto', px: 4, py: 3 }}>
-      <Box
-        display="flex"
-        alignItems="center"
-        justifyContent="space-between"
-        mb={4}
-      >
-        <Typography variant="h4" fontWeight={700}>
-          Library
+    <Box sx={{ maxWidth: 1100, mx: 'auto', px: 4, py: 3 }}>
+      {/* 顶部栏 */}
+      <Box display="flex" alignItems="center" justifyContent="space-between" mb={4}>
+        <Typography variant="h5" fontWeight={600}>
+          书架
         </Typography>
-        <Box display="flex" gap={1} alignItems="center">
-          <Button
-            variant="outlined"
-            startIcon={<FolderOpenIcon />}
-            onClick={handleImport}
-          >
-            Open Book
+        <Box display="flex" gap={1.5} alignItems="center">
+          <Button variant="outlined" startIcon={<FolderOpenIcon />} onClick={handleImport}>
+            导入
           </Button>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => setNewDialogOpen(true)}
-          >
-            New Book
+          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setNewDialogOpen(true)}>
+            新建书
           </Button>
-          <IconButton onClick={() => setSearchOpen(true)}>
+          <IconButton onClick={() => setSearchOpen(true)} aria-label="搜索">
             <SearchIcon />
           </IconButton>
-          <IconButton onClick={onToggleTheme}>
+          <IconButton onClick={onToggleTheme} aria-label="切换主题">
             {mode === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
           </IconButton>
-          <IconButton
-            onClick={async () => {
-              const s = await getGlobalSettings()
-              setGlobalGitName(s.name)
-              setGlobalGitEmail(s.email)
-              setGlobalProxy(s.proxy)
-              try {
-                const entries = await readLogs(200)
-                setLogs(entries.reverse())
-              } catch {
-                /* ignore */
-              }
-              setSettingsOpen(true)
-            }}
-          >
+          <IconButton aria-label="设置" onClick={refresh}>
             <SettingsIcon />
           </IconButton>
         </Box>
       </Box>
 
-      {books.length === 0 ? (
-        <Box textAlign="center" py={12}>
-          <Typography variant="h6" color="text.secondary" mb={1}>
-            Your library is empty
+      {/* 最近打开 */}
+      {recentBooks.length > 0 && (
+        <>
+          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 2, fontWeight: 500 }}>
+            最近打开
           </Typography>
-          <Typography color="text.secondary" mb={3}>
-            Create your first book or import an existing one to get started
-          </Typography>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => setNewDialogOpen(true)}
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3.5, mb: 4 }}>
+            {recentBooks.map(book => (
+              <BookCover
+                key={book.path}
+                title={book.title}
+                updatedTime={book.updated_time}
+                onClick={() => onOpenBook(book)}
+                onRename={newTitle => handleRename(book.path, newTitle)}
+                onDelete={() => handleDelete(book.path)}
+              />
+            ))}
+          </Box>
+        </>
+      )}
+
+      {/* 全部书 */}
+      <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 2, fontWeight: 500 }}>
+        全部书
+      </Typography>
+
+      {allBooks.length === 0 ? (
+        <Box
+          textAlign="center"
+          py={12}
+          sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}
+        >
+          <Box
+            sx={{
+              width: 80,
+              height: 80,
+              borderRadius: '20px',
+              bgcolor: 'var(--color-bg-tertiary)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              mb: 1,
+            }}
           >
-            Create Your First Book
-          </Button>
+            <AddIcon sx={{ fontSize: 40, color: 'text.secondary', opacity: 0.4 }} />
+          </Box>
+          <Typography variant="h6" color="text.primary" fontWeight={600}>
+            还没有书
+          </Typography>
+          <Typography color="text.secondary" sx={{ maxWidth: 360 }}>
+            创建第一本书来开始写作，或导入已有的 gfbook 项目
+          </Typography>
+          <Box display="flex" gap={1} mt={1}>
+            <Button variant="contained" size="large" startIcon={<AddIcon />} onClick={() => setNewDialogOpen(true)}>
+              创建书
+            </Button>
+            <Button variant="outlined" size="large" startIcon={<FolderOpenIcon />} onClick={handleImport}>
+              导入书
+            </Button>
+          </Box>
         </Box>
       ) : (
-        <Box
-          sx={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 3,
-            justifyContent: 'flex-start',
-          }}
-        >
-          {books.map((book) => (
-            <Box key={book.path}>
-              <BookCover
-                title={book.title}
-                onClick={() => onOpenBook(book)}
-                bookPath={book.path}
-                updatedTime={book.updated_time}
-                onDelete={() => removeBook(book.path)}
-                onRename={(newTitle) => changeBookName(book.path, newTitle)}
-                gitStatusText={gitDataMap[book.path]?.status || ''}
-                remoteUrl={gitDataMap[book.path]?.remote || null}
-                aheadBehind={gitDataMap[book.path]?.aheadBehind || null}
-              />
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ display: 'block', mt: 0.5, pl: 0.5 }}
-              >
-                {formatDate(book.updated_time)}
-              </Typography>
-            </Box>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3.5, justifyContent: 'flex-start' }}>
+          {allBooks.map(book => (
+            <BookCover
+              key={book.path}
+              title={book.title}
+              updatedTime={book.updated_time}
+              onClick={() => onOpenBook(book)}
+              onRename={newTitle => handleRename(book.path, newTitle)}
+              onDelete={() => handleDelete(book.path)}
+            />
           ))}
         </Box>
       )}
 
-      <Dialog
-        open={newDialogOpen}
-        onClose={() => setNewDialogOpen(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>New Book</DialogTitle>
+      {/* 新建书弹窗 */}
+      <Dialog open={newDialogOpen} onClose={() => !creating && setNewDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>新建书</DialogTitle>
         <DialogContent>
           <TextField
             autoFocus
             margin="dense"
-            label="Book Title"
+            label="书名"
             fullWidth
             value={newTitle}
-            onChange={(e) => {
-              setNewTitle(e.target.value)
-              // Auto-generate folder name from title
-              let slug =
-                e.target.value
-                  .toLowerCase()
-                  .replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-')
-                  .replace(/^-|-$/g, '') || 'untitled'
-              slug = slug.replace(INVALID_FOLDER_CHARS, '')
-              setNewFolderName(slug)
-              setNewFolderError(validateFolderName(slug))
-            }}
-          />
-          <TextField
-            margin="dense"
-            label="Folder Name"
-            fullWidth
-            value={newFolderName}
-            error={!!newFolderError || newPathExists}
-            helperText={
-              newPathExists
-                ? 'This path already exists'
-                : newFolderError || 'Folder name on disk'
-            }
-            onChange={(e) => {
-              const val = e.target.value
-              setNewFolderName(val)
-              setNewFolderError(validateFolderName(val))
-              setNewPathExists(false)
-            }}
-            sx={{ mt: 1 }}
-          />
-          <TextField
-            margin="dense"
-            label="Location"
-            fullWidth
-            size="small"
-            value={newParentDir}
-            onChange={(e) => setNewParentDir(e.target.value)}
-            sx={{ mt: 1 }}
-            InputProps={{
-              endAdornment: (
-                <Button
-                  size="small"
-                  sx={{ minWidth: 'auto', textTransform: 'none' }}
-                  onClick={async () => {
-                    const sel = await open({
-                      directory: true,
-                      multiple: false,
-                      title: 'Select location',
-                    })
-                    if (sel) setNewParentDir(sel)
-                  }}
-                >
-                  Browse
-                </Button>
-              ),
-            }}
-          />
-          <Typography
-            variant="caption"
-            color="text.secondary"
-            sx={{ display: 'block', mt: 1 }}
-          >
-            Will be created at: {newParentDir}/{newFolderName}
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setNewDialogOpen(false)}>Cancel</Button>
-          <Button
-            onClick={handleCreate}
-            variant="contained"
-            disabled={
-              !newTitle.trim() ||
-              !newFolderName.trim() ||
-              !!newFolderError ||
-              newPathExists
-            }
-          >
-            Create
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>Settings</DialogTitle>
-        <DialogContent>
-          <Typography variant="subtitle2" gutterBottom>
-            Git Author
-          </Typography>
-          <Box display="flex" gap={1} mb={2}>
-            <TextField
-              size="small"
-              label="Name"
-              placeholder="Your Name"
-              value={globalGitName}
-              onChange={(e) => setGlobalGitName(e.target.value)}
-              sx={{ flex: 1 }}
-            />
-            <TextField
-              size="small"
-              label="Email"
-              placeholder="you@example.com"
-              value={globalGitEmail}
-              onChange={(e) => setGlobalGitEmail(e.target.value)}
-              sx={{ flex: 1 }}
-            />
-          </Box>
-
-          <Divider sx={{ my: 2 }} />
-
-          <Typography variant="subtitle2" gutterBottom>
-            Proxy
-          </Typography>
-          <Box display="flex" gap={1} alignItems="center" mb={1}>
-            <TextField
-              size="small"
-              placeholder="http://proxy:8080"
-              value={globalProxy}
-              onChange={(e) => setGlobalProxy(e.target.value)}
-              sx={{ flex: 1 }}
-            />
-          </Box>
-
-          <Divider sx={{ my: 2 }} />
-
-          <Typography variant="subtitle2" gutterBottom>
-            Activity Log
-          </Typography>
-          {logs.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">
-              No logs
-            </Typography>
-          ) : (
-            <Box
-              sx={{
-                fontFamily: 'monospace',
-                fontSize: '0.7rem',
-                whiteSpace: 'pre-wrap',
-                lineHeight: 1.6,
-                maxHeight: 250,
-                overflow: 'auto',
-                border: 1,
-                borderColor: 'divider',
-                borderRadius: 1,
-                p: 1,
-              }}
-            >
-              {logs.map((entry, i) => (
-                <Box
-                  key={i}
-                  sx={{
-                    py: 0.2,
-                    borderBottom: '1px solid',
-                    borderColor: 'divider',
-                  }}
-                >
-                  <Box component="span" sx={{ color: 'text.secondary', mr: 1 }}>
-                    {new Date(entry.t).toLocaleString()}
-                  </Box>
-                  <Box
-                    component="span"
-                    sx={{
-                      color:
-                        entry.e.startsWith('set_') ||
-                        entry.e === 'import_image' ||
-                        entry.e === 'paste_image' ||
-                        entry.e === 'download_image'
-                          ? 'info.main'
-                          : entry.e.startsWith('create_')
-                            ? 'success.main'
-                            : entry.e.startsWith('delete_')
-                              ? 'error.main'
-                              : 'warning.main',
-                      mr: 1,
-                      fontWeight: 600,
-                    }}
-                  >
-                    [{entry.e}]
-                  </Box>
-                  <Box component="span">{entry.d}</Box>
-                </Box>
-              ))}
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setSettingsOpen(false)}>Cancel</Button>
-          <Button
-            onClick={async () => {
-              try {
-                await setGlobalSettings(
-                  globalGitName,
-                  globalGitEmail,
-                  globalProxy,
-                )
-                setSettingsOpen(false)
-              } catch (e) {
-                console.error(e)
+            onChange={e => setNewTitle(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && newTitle.trim()) {
+                e.preventDefault()
+                handleNewBook()
               }
             }}
+            disabled={creating}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setNewDialogOpen(false)} disabled={creating}>取消</Button>
+          <Button
+            onClick={handleNewBook}
             variant="contained"
+            disabled={!newTitle.trim() || creating}
           >
-            Save
+            {creating ? '创建中…' : '创建'}
           </Button>
         </DialogActions>
       </Dialog>
-
-      <SearchDialog
-        open={searchOpen}
-        onClose={() => setSearchOpen(false)}
-        bookPaths={books.map((b) => b.path)}
-        onSelectChapter={(bookPath, chapterId) => {
-          const book = books.find((b) => b.path === bookPath)
-          if (book) onOpenBook(book, chapterId)
-          setSearchOpen(false)
-        }}
-      />
     </Box>
   )
 }

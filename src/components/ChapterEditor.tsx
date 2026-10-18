@@ -448,8 +448,7 @@ const EditorArea = memo(function EditorArea({
             borderColor: 'divider',
             overflow: 'auto',
             p: 1.5,
-            bgcolor: (t) =>
-              t.palette.mode === 'dark' ? 'grey.900' : 'grey.50',
+            bgcolor: 'var(--color-bg-tertiary)',
           }}
         >
           <Typography

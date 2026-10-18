@@ -160,7 +160,7 @@ export default function SearchDialog({
                     sx={{
                       display: 'block',
                       pl: 1,
-                      fontFamily: 'monospace',
+                      fontFamily: 'var(--font-family-mono)',
                       fontSize: '0.7rem',
                     }}
                   >

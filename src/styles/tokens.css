@@ -1,0 +1,164 @@
+/* ============================================================
+   Ganfan Design Tokens — CSS Custom Properties
+   版本: 1.2.0 | 对齐 gfjournal Brand 阶梯 + Moss 墨绿 + 护眼米绿
+   使用方式: 在 index.html 中引入此文件
+   覆盖范围: gfbook 及所有 Web/Tauri 产品线
+
+   Brand 阶梯: light #F4B040  default #F4A523  dark #D08A1D  darker #B8731A
+   Moss: background #0C1A17  surface #142B26  card #2D5145  text #EDEBDD/#A7B6AC
+   护眼米绿: 与 Moss 同 HSL 166° 反相，高亮度低饱和
+   ============================================================ */
+
+:root {
+  /* ── 亮色主色（护眼米绿 + 深琥珀 darker 档）── */
+  --color-accent: #B8731A;
+  --color-accent-hover: #8E5814;
+  --color-accent-text: #FFFFFF;
+
+  /* ── 亮色背景体系（护眼米绿）── */
+  --color-bg-primary: #F2F5F2;
+  --color-bg-secondary: #FAFAF7;
+  --color-bg-tertiary: #E8ECE8;
+  --color-bg-elevated: #FFFFFF;
+  --color-bg-hover: rgba(0, 0, 0, 0.04);
+  --color-bg-selected: rgba(184, 115, 26, 0.10);
+
+  /* ── 亮色文字体系（墨绿黑，与 Moss 反相）── */
+  --color-text-primary: #2D3B36;
+  --color-text-secondary: #6B7A73;
+  --color-text-tertiary: #8A9991;
+
+  /* ── 边框 ── */
+  --color-border-primary: #D8DED8;
+  --color-border-focus: #B8731A;
+
+  /* ── 语义色 ── */
+  --color-success: #22C55E;
+  --color-warning: #EAB308;
+  --color-error: #EF4444;
+
+  /* ── 编辑器专用色 ── */
+  --color-code-bg: rgba(128, 128, 128, 0.08);
+  --color-code-block-bg: rgba(45, 59, 54, 0.04);
+  --color-blockquote-border: #D8DED8;
+  --color-blockquote-text: #6B7A73;
+
+  /* ── 字体 ── */
+  --font-family-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-family-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Menlo, monospace;
+
+  /* ── 字号 ── */
+  --font-size-caption: 11px;
+  --font-size-body-small: 13px;
+  --font-size-body: 16px;
+  --font-size-body-large: 20px;
+  --font-size-h4: 24px;
+  --font-size-h3: 30px;
+  --font-size-h2: 38px;
+  --font-size-h1: 48px;
+
+  /* ── 编辑器字号 ── */
+  --font-size-editor-body: 16px;
+  --font-size-editor-h1: 28px;
+  --font-size-editor-h2: 22px;
+  --font-size-editor-h3: 18px;
+
+  /* ── 字重 ── */
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* ── 行高 ── */
+  --line-height-tight: 1.2;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.75;
+
+  /* ── 间距 ── */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+  --space-3xl: 64px;
+
+  /* ── 页面布局 ── */
+  --page-padding: 32px;
+  --editor-content-max-width: 720px;
+  --editor-horizontal-padding: 48px;
+
+  /* ── 侧边栏 ── */
+  --sidebar-width: 260px;
+  --sidebar-min-width: 180px;
+  --sidebar-max-width: 500px;
+
+  /* ── 圆角 ── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
+
+  /* ── 阴影 ── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.12);
+
+  /* ── 动效 ── */
+  --duration-instant: 100ms;
+  --duration-fast: 200ms;
+  --duration-normal: 300ms;
+  --duration-slow: 500ms;
+  --ease-default: cubic-bezier(0.25, 0.1, 0.25, 1);
+
+  /* ── 组件高度 ── */
+  --toolbar-height: 40px;
+  --tree-item-height: 32px;
+  --button-height-sm: 28px;
+  --button-height-md: 36px;
+  --button-height-lg: 44px;
+  --input-height: 36px;
+}
+
+/* ── 暗色模式（gfjournal Moss 墨绿深色方案） ── */
+[data-theme="dark"] {
+  --color-bg-primary: #0C1A17;
+  --color-bg-secondary: #142B26;
+  --color-bg-tertiary: #1E3D36;
+  --color-bg-elevated: #2D5145;
+  --color-bg-hover: rgba(244, 176, 64, 0.06);
+  --color-bg-selected: rgba(244, 176, 64, 0.15);
+
+  --color-text-primary: #EDEBDD;
+  --color-text-secondary: #A7B6AC;
+  --color-text-tertiary: #5B6E68;
+
+  --color-border-primary: #1E3D36;
+  --color-border-focus: #F4B040;
+
+  --color-accent: #F4B040;
+  --color-accent-hover: #E89B26;
+  --color-accent-text: #0C1A17;
+
+  --color-success: #4ADE80;
+  --color-warning: #FACC15;
+  --color-error: #F87171;
+
+  --color-code-bg: rgba(244, 176, 64, 0.08);
+  --color-code-block-bg: rgba(20, 43, 38, 0.6);
+  --color-blockquote-border: #1E3D36;
+  --color-blockquote-text: #A7B6AC;
+
+  --shadow-sm: none;
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.5);
+}
+
+/* ── 响应式页面边距 ── */
+@media (max-width: 599px) {
+  :root { --page-padding: 16px; }
+}
+@media (min-width: 600px) and (max-width: 899px) {
+  :root { --page-padding: 24px; }
+}

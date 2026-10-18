@@ -85,7 +85,7 @@ export default function MathDialog({
           sx={{
             mt: 2,
             p: 2,
-            bgcolor: 'grey.50',
+            bgcolor: 'var(--color-bg-tertiary)',
             borderRadius: 1,
             textAlign: 'center',
             minHeight: 60,

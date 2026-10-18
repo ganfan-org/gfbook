@@ -379,8 +379,7 @@ export default function BookDetail({
             flex: 1,
             display: 'flex',
             flexDirection: 'column',
-            bgcolor: (t) =>
-              t.palette.mode === 'dark' ? 'grey.900' : 'grey.50',
+            bgcolor: 'var(--color-bg-tertiary)',
             borderRight: 1,
             borderColor: 'divider',
             minWidth: 0,

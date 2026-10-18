@@ -135,7 +135,7 @@ export default function BookSettingsDialog({
               variant="caption"
               color="text.secondary"
               sx={{
-                fontFamily: 'monospace',
+                fontFamily: 'var(--font-family-mono)',
                 fontSize: '0.7rem',
                 wordBreak: 'break-all',
               }}
@@ -267,7 +267,7 @@ export default function BookSettingsDialog({
                   color="text.secondary"
                   mb={1}
                   sx={{
-                    fontFamily: 'monospace',
+                    fontFamily: 'var(--font-family-mono)',
                     fontSize: '0.75rem',
                     whiteSpace: 'pre-wrap',
                   }}
@@ -315,7 +315,7 @@ export default function BookSettingsDialog({
                     sx={{
                       display: 'block',
                       mb: 0.5,
-                      fontFamily: 'monospace',
+                      fontFamily: 'var(--font-family-mono)',
                       fontSize: '0.7rem',
                     }}
                   >
@@ -403,7 +403,7 @@ export default function BookSettingsDialog({
                           variant="caption"
                           sx={{
                             flex: 1,
-                            fontFamily: 'monospace',
+                            fontFamily: 'var(--font-family-mono)',
                             fontSize: '0.65rem',
                             wordBreak: 'break-all',
                           }}
@@ -469,7 +469,7 @@ export default function BookSettingsDialog({
             ) : (
               <Box
                 sx={{
-                  fontFamily: 'monospace',
+                  fontFamily: 'var(--font-family-mono)',
                   fontSize: '0.7rem',
                   whiteSpace: 'pre-wrap',
                   lineHeight: 1.6,

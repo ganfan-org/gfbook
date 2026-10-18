@@ -1,125 +1,92 @@
 .gfbook-editor {
   outline: none;
   min-height: 300px;
-  padding: 16px 48px;
-  line-height: 1.75;
-  font-size: 0.95rem;
+  padding: 16px var(--editor-horizontal-padding, 48px);
+  max-width: var(--editor-content-max-width, 720px);
+  margin: 0 auto;
+  line-height: var(--line-height-relaxed, 1.75);
+  font-size: var(--font-size-editor-body, 16px);
+  font-family: var(--font-family-sans);
+  color: var(--color-text-primary);
 }
 
 .gfbook-editor p {
   margin: 0.4em 0;
 }
 
-/* Headings - smaller sizes with markers */
+/* 标题 — 清晰视觉层级，无调试标签 */
 .gfbook-editor h1 {
-  font-size: 1.25em;
-  font-weight: 600;
-  margin: 0.6em 0 0.3em;
-  position: relative;
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin: 1.2em 0 0.4em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--color-border-primary);
+  color: var(--color-text-primary);
 }
-.gfbook-editor h1::before {
-  content: 'H1';
-  position: absolute;
-  left: -3em;
-  top: 0;
-  font-size: 0.65em;
-  font-weight: 400;
-  color: #999;
-  background: rgba(128,128,128,0.12);
-  padding: 0.1em 0.4em;
-  border-radius: 3px;
-  line-height: 1.6;
-}
-
 .gfbook-editor h2 {
-  font-size: 1.1em;
+  font-size: 1.375rem;
   font-weight: 600;
-  margin: 0.5em 0 0.25em;
-  position: relative;
+  margin: 1em 0 0.3em;
+  color: var(--color-text-primary);
 }
-.gfbook-editor h2::before {
-  content: 'H2';
-  position: absolute;
-  left: -3em;
-  top: 0;
-  font-size: 0.65em;
-  font-weight: 400;
-  color: #999;
-  background: rgba(128,128,128,0.12);
-  padding: 0.1em 0.4em;
-  border-radius: 3px;
-  line-height: 1.6;
-}
-
 .gfbook-editor h3 {
-  font-size: 1em;
+  font-size: 1.125rem;
   font-weight: 600;
-  margin: 0.4em 0 0.2em;
-  position: relative;
-}
-.gfbook-editor h3::before {
-  content: 'H3';
-  position: absolute;
-  left: -3em;
-  top: 0;
-  font-size: 0.65em;
-  font-weight: 400;
-  color: #999;
-  background: rgba(128,128,128,0.12);
-  padding: 0.1em 0.4em;
-  border-radius: 3px;
-  line-height: 1.6;
+  margin: 0.8em 0 0.25em;
+  color: var(--color-text-primary);
 }
 
-.gfbook-editor ul, .gfbook-editor ol {
+.gfbook-editor ul,
+.gfbook-editor ol {
   padding-left: 1.5em;
   margin: 0.4em 0;
 }
-
 .gfbook-editor li {
   margin: 0.15em 0;
 }
 
 .gfbook-editor blockquote {
-  border-left: 3px solid #ddd;
+  border-left: 3px solid var(--color-blockquote-border);
   margin: 0.4em 0;
   padding-left: 1em;
-  color: #666;
+  color: var(--color-blockquote-text);
 }
 
 .gfbook-editor code {
-  background: rgba(128,128,128,0.12);
+  background: var(--color-code-bg);
   padding: 0.15em 0.35em;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   font-size: 0.92em;
+  font-family: var(--font-family-mono);
 }
 
 .gfbook-editor pre {
-  background: rgba(128,128,128,0.08);
+  background: var(--color-code-block-bg);
   padding: 0.8em 1em;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   overflow-x: auto;
   font-size: 0.92em;
+  border: 1px solid var(--color-border-primary);
 }
-
 .gfbook-editor pre code {
   background: none;
   padding: 0;
 }
 
 .gfbook-editor a {
-  color: #1976d2;
+  color: var(--color-accent);
   text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .gfbook-editor hr {
   border: none;
-  border-top: 1px solid #ddd;
+  border-top: 1px solid var(--color-border-primary);
   margin: 1.2em 0;
 }
 
 .ProseMirror p.is-editor-empty:first-child::before {
-  color: #adb5bd;
+  color: var(--color-text-tertiary);
   content: attr(data-placeholder);
   float: left;
   height: 0;
@@ -129,37 +96,49 @@
 .gfbook-editor img {
   max-width: 100%;
   height: auto;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   margin: 0.8em 0;
   display: block;
 }
 
-/* Math formula styling */
-.gfbook-editor [data-type="blockMath"] {
+/* Math */
+.gfbook-editor [data-type='blockMath'] {
   text-align: center;
   padding: 0.5em 0;
   overflow-x: auto;
 }
-.gfbook-editor [data-type="inlineMath"] {
+.gfbook-editor [data-type='inlineMath'] {
   padding: 0 0.15em;
 }
 .gfbook-editor .katex-display {
   margin: 0.5em 0;
 }
 
-/* Table styling */
+/* Tables */
 .gfbook-editor table {
   border-collapse: collapse;
   width: 100%;
   margin: 0.8em 0;
+  font-size: 0.9375rem;
 }
-.gfbook-editor th, .gfbook-editor td {
-  border: 1px solid #ccc;
+.gfbook-editor th,
+.gfbook-editor td {
+  border: 1px solid var(--color-border-primary);
   padding: 6px 10px;
   text-align: left;
   min-width: 60px;
 }
 .gfbook-editor th {
-  background: rgba(128,128,128,0.08);
+  background: var(--color-code-block-bg);
   font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+/* Focus mode */
+.gfbook-editor.focus-mode .ProseMirror > * {
+  transition: opacity 0.3s ease;
+  opacity: 0.4;
+}
+.gfbook-editor.focus-mode .ProseMirror > .focused-paragraph {
+  opacity: 1;
 }

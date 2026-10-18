@@ -65,7 +65,7 @@ export default function TableFloatingMenu({
         gap: 0.3,
         bgcolor: 'background.paper',
         borderRadius: 1,
-        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+        boxShadow: 'var(--shadow-md)',
         p: 0.3,
         pointerEvents: 'auto',
       }}

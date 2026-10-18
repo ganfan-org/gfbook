@@ -58,9 +58,9 @@ function ChapterItem(props: {
 
   const borderStyle = isOver
     ? dropPos === 'before'
-      ? { borderTop: '2px solid #1976d2' }
+      ? { borderTop: '2px solid', borderColor: 'primary.main' }
       : dropPos === 'after'
-        ? { borderBottom: '2px solid #1976d2' }
+        ? { borderBottom: '2px solid', borderColor: 'primary.main' }
         : {}
     : {};
 
