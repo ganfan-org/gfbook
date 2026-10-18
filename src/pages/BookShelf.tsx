@@ -1,13 +1,13 @@
 import AddIcon from '@mui/icons-material/Add'
-import FolderOpenIcon from '@mui/icons-material/FolderOpen'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
-import LightModeIcon from '@mui/icons-material/LightMode'
-import SettingsIcon from '@mui/icons-material/Settings'
-import MoreVertIcon from '@mui/icons-material/MoreVert'
-import SearchIcon from '@mui/icons-material/Search'
 import DeleteIcon from '@mui/icons-material/Delete'
 import DriveFileRenameOutlineIcon from '@mui/icons-material/DriveFileRenameOutline'
+import FolderOpenIcon from '@mui/icons-material/FolderOpen'
 import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined'
+import LightModeIcon from '@mui/icons-material/LightMode'
+import MoreVertIcon from '@mui/icons-material/MoreVert'
+import SearchIcon from '@mui/icons-material/Search'
+import SettingsIcon from '@mui/icons-material/Settings'
 import {
   Box,
   Typography,
@@ -26,11 +26,15 @@ import {
   Menu,
   MenuItem,
   ListItemIcon,
+  Divider,
 } from '@mui/material'
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
 import { useState, useMemo } from 'react'
+
+import SearchDialog from '../components/SearchDialog'
 import { useBooks } from '../hooks/useBooks'
 import type { BookInfo } from '../types'
+import { readLogs, type LogEntry } from '../utils/commands'
 
 // ═══════════════════════════════════════════
 // 封面颜色 — 低饱和高级色
@@ -290,12 +294,17 @@ interface BookShelfProps {
 }
 
 export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelfProps) {
-  const { books, loading, refresh, createBook, removeBook, changeBookName, importExternalBook } = useBooks()
+  const { books, loading, createBook, removeBook, changeBookName, importExternalBook, getGlobalSettings, setGlobalSettings } = useBooks()
   const [newDialogOpen, setNewDialogOpen] = useState(false)
   const [newTitle, setNewTitle] = useState('')
   const [creating, setCreating] = useState(false)
   const [deletingPath, setDeletingPath] = useState<string | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [globalGitName, setGlobalGitName] = useState('')
+  const [globalGitEmail, setGlobalGitEmail] = useState('')
+  const [globalProxy, setGlobalProxy] = useState('')
+  const [logs, setLogs] = useState<LogEntry[]>([])
 
   const handleNewBook = async () => {
     const title = newTitle.trim()
@@ -372,7 +381,26 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
           <IconButton onClick={onToggleTheme} aria-label="切换主题">
             {mode === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
           </IconButton>
-          <IconButton aria-label="设置" onClick={refresh}>
+          <IconButton
+            aria-label="设置"
+            onClick={async () => {
+              try {
+                const s = await getGlobalSettings()
+                setGlobalGitName(s.name)
+                setGlobalGitEmail(s.email)
+                setGlobalProxy(s.proxy)
+              } catch (e) {
+                console.error('Failed to load settings:', e)
+              }
+              try {
+                const entries = await readLogs(200)
+                setLogs(entries.reverse())
+              } catch {
+                /* ignore */
+              }
+              setSettingsOpen(true)
+            }}
+          >
             <SettingsIcon />
           </IconButton>
         </Box>
@@ -459,6 +487,124 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* 设置弹窗：全局 Git 作者、代理与活动日志 */}
+      <Dialog open={settingsOpen} onClose={() => setSettingsOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>设置</DialogTitle>
+        <DialogContent>
+          <Typography variant="subtitle2" gutterBottom>Git 作者</Typography>
+          <Box display="flex" gap={1} mb={2}>
+            <TextField
+              size="small"
+              label="姓名"
+              placeholder="Your Name"
+              value={globalGitName}
+              onChange={e => setGlobalGitName(e.target.value)}
+              sx={{ flex: 1 }}
+            />
+            <TextField
+              size="small"
+              label="邮箱"
+              placeholder="you@example.com"
+              value={globalGitEmail}
+              onChange={e => setGlobalGitEmail(e.target.value)}
+              sx={{ flex: 1 }}
+            />
+          </Box>
+
+          <Divider sx={{ my: 2 }} />
+
+          <Typography variant="subtitle2" gutterBottom>代理</Typography>
+          <TextField
+            size="small"
+            fullWidth
+            placeholder="http://proxy:8080"
+            value={globalProxy}
+            onChange={e => setGlobalProxy(e.target.value)}
+          />
+
+          <Divider sx={{ my: 2 }} />
+
+          <Typography variant="subtitle2" gutterBottom>活动日志</Typography>
+          {logs.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">暂无日志</Typography>
+          ) : (
+            <Box
+              sx={{
+                fontFamily: 'monospace',
+                fontSize: '0.7rem',
+                whiteSpace: 'pre-wrap',
+                lineHeight: 1.6,
+                maxHeight: 250,
+                overflow: 'auto',
+                border: 1,
+                borderColor: 'divider',
+                borderRadius: 1,
+                p: 1,
+              }}
+            >
+              {logs.map(entry => (
+                <Box
+                  key={`${entry.t}-${entry.e}-${entry.d}`}
+                  sx={{ py: 0.2, borderBottom: '1px solid', borderColor: 'divider' }}
+                >
+                  <Box component="span" sx={{ color: 'text.secondary', mr: 1 }}>
+                    {new Date(entry.t).toLocaleString()}
+                  </Box>
+                  <Box
+                    component="span"
+                    sx={{
+                      color:
+                        entry.e.startsWith('set_') ||
+                        entry.e === 'import_image' ||
+                        entry.e === 'paste_image' ||
+                        entry.e === 'download_image'
+                          ? 'info.main'
+                          : entry.e.startsWith('create_')
+                            ? 'success.main'
+                            : entry.e.startsWith('delete_')
+                              ? 'error.main'
+                              : 'warning.main',
+                      mr: 1,
+                      fontWeight: 600,
+                    }}
+                  >
+                    [{entry.e}]
+                  </Box>
+                  <Box component="span">{entry.d}</Box>
+                </Box>
+              ))}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSettingsOpen(false)}>取消</Button>
+          <Button
+            variant="contained"
+            onClick={async () => {
+              try {
+                await setGlobalSettings(globalGitName, globalGitEmail, globalProxy)
+                setSettingsOpen(false)
+              } catch (e) {
+                console.error('Failed to save settings:', e)
+              }
+            }}
+          >
+            保存
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <SearchDialog
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        bookPaths={books.map(b => b.path)}
+        onSelectChapter={(bookPath, chapterId) => {
+          const book = books.find(b => b.path === bookPath)
+          if (book) onOpenBook(book, chapterId)
+          setSearchOpen(false)
+        }}
+      />
     </Box>
   )
 }
