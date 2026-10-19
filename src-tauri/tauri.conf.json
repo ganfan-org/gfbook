@@ -1,8 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Ganfan Book",
+  "mainBinaryName": "GanfanBook",
   "version": "0.1.0",
-  "identifier": "com.gfbook.app",
+  "identifier": "org.ganfan.app.gfbook",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",

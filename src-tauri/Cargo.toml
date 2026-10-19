@@ -7,6 +7,13 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[[bin]]
+# Dev-mode Dock name comes from the binary file name; a bundle app (from
+# `tauri build`) uses productName ("Ganfan Book") instead. No spaces allowed
+# here because the bin name doubles as the Rust crate name.
+name = "GanfanBook"
+path = "src/main.rs"
+
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
