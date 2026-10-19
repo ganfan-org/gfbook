@@ -1,3 +1,16 @@
+import { Box, Typography } from '@mui/material'
+import { invoke } from '@tauri-apps/api/core'
+import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
+import Image from '@tiptap/extension-image'
+import { Mathematics } from '@tiptap/extension-mathematics'
+import { Table } from '@tiptap/extension-table'
+import TableCellExtension from '@tiptap/extension-table-cell'
+import TableHeaderExtension from '@tiptap/extension-table-header'
+import TableRow from '@tiptap/extension-table-row'
+import { MarkdownManager } from '@tiptap/markdown'
+import { useEditor, EditorContent } from '@tiptap/react'
+import StarterKit from '@tiptap/starter-kit'
+import i18next from 'i18next'
 import {
   memo,
   useCallback,
@@ -7,22 +20,13 @@ import {
   useRef,
   useState,
 } from 'react'
-import { invoke } from '@tauri-apps/api/core'
-import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
-import { useEditor, EditorContent } from '@tiptap/react'
-import StarterKit from '@tiptap/starter-kit'
-import Image from '@tiptap/extension-image'
-import { Mathematics } from '@tiptap/extension-mathematics'
-import { Table } from '@tiptap/extension-table'
-import TableCellExtension from '@tiptap/extension-table-cell'
-import TableHeaderExtension from '@tiptap/extension-table-header'
-import TableRow from '@tiptap/extension-table-row'
-import { MarkdownManager } from '@tiptap/markdown'
-import { Box, Typography } from '@mui/material'
+import { useTranslation } from 'react-i18next'
+
+import { getAssetUrl } from '../utils/commands'
+
 import EditorToolbar from './EditorToolbar'
 import LinkDialog from './LinkDialog'
 import MathDialog from './MathDialog'
-import { getAssetUrl } from '../utils/commands'
 import 'katex/dist/katex.min.css'
 import './ChapterEditor.css'
 
@@ -382,7 +386,7 @@ async function insertImage(
         extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'],
       },
     ],
-    title: 'Select image',
+    title: i18next.t('editor.selectImage'),
   })
   if (!selected) return
   try {
@@ -417,6 +421,7 @@ const EditorArea = memo(function EditorArea({
   tocItems,
   scrollContainerRef,
 }: EditorAreaProps) {
+  const { t } = useTranslation()
   return (
     <Box sx={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
       <Box
@@ -432,7 +437,9 @@ const EditorArea = memo(function EditorArea({
           <EditorContent editor={editor} />
         ) : (
           <Box sx={{ p: 4 }}>
-            <Typography color="text.secondary">Loading editor...</Typography>
+            <Typography color="text.secondary">
+              {t('editor.loadingEditor')}
+            </Typography>
           </Box>
         )}
       </Box>
@@ -461,11 +468,11 @@ const EditorArea = memo(function EditorArea({
               letterSpacing: 1,
             }}
           >
-            Contents
+            {t('editor.contents')}
           </Typography>
           {tocItems.length === 0 ? (
             <Typography variant="caption" color="text.secondary">
-              No headings
+              {t('editor.noHeadings')}
             </Typography>
           ) : (
             tocItems.map((item, i) => (

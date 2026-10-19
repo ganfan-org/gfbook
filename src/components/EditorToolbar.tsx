@@ -1,3 +1,4 @@
+import DeleteIcon from '@mui/icons-material/Delete'
 import FormatBoldIcon from '@mui/icons-material/FormatBold'
 import FormatItalicIcon from '@mui/icons-material/FormatItalic'
 import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted'
@@ -13,9 +14,9 @@ import LooksTwoIcon from '@mui/icons-material/LooksTwo'
 import SuperscriptIcon from '@mui/icons-material/Superscript'
 import TableChartIcon from '@mui/icons-material/TableChart'
 import TextFieldsIcon from '@mui/icons-material/TextFields'
-import DeleteIcon from '@mui/icons-material/Delete'
 import { Box, IconButton, Tooltip } from '@mui/material'
 import type { Editor } from '@tiptap/core'
+import { useTranslation } from 'react-i18next'
 
 interface EditorToolbarProps {
   editor: Editor | null
@@ -35,6 +36,7 @@ export default function EditorToolbar({
   onEditMath,
   onInsertImage,
 }: EditorToolbarProps) {
+  const { t } = useTranslation()
   if (!editor) return null
 
   return (
@@ -51,7 +53,7 @@ export default function EditorToolbar({
         flexWrap: 'wrap',
       }}
     >
-      <Tooltip title="Paragraph">
+      <Tooltip title={t('toolbar.paragraph')}>
         <IconButton
           size="small"
           onClick={() => editor.chain().focus().setParagraph().run()}
@@ -99,7 +101,7 @@ export default function EditorToolbar({
           <Looks3Icon fontSize="small" />
         </IconButton>
       </Tooltip>
-      <Tooltip title="Bold">
+      <Tooltip title={t('toolbar.bold')}>
         <IconButton
           size="small"
           onClick={() => editor.chain().focus().toggleBold().run()}
@@ -108,7 +110,7 @@ export default function EditorToolbar({
           <FormatBoldIcon fontSize="small" />
         </IconButton>
       </Tooltip>
-      <Tooltip title="Italic">
+      <Tooltip title={t('toolbar.italic')}>
         <IconButton
           size="small"
           onClick={() => editor.chain().focus().toggleItalic().run()}
@@ -117,7 +119,7 @@ export default function EditorToolbar({
           <FormatItalicIcon fontSize="small" />
         </IconButton>
       </Tooltip>
-      <Tooltip title="Bullet list">
+      <Tooltip title={t('toolbar.bulletList')}>
         <IconButton
           size="small"
           onClick={() => editor.chain().focus().toggleBulletList().run()}
@@ -126,7 +128,7 @@ export default function EditorToolbar({
           <FormatListBulletedIcon fontSize="small" />
         </IconButton>
       </Tooltip>
-      <Tooltip title="Ordered list">
+      <Tooltip title={t('toolbar.orderedList')}>
         <IconButton
           size="small"
           onClick={() => editor.chain().focus().toggleOrderedList().run()}
@@ -135,7 +137,13 @@ export default function EditorToolbar({
           <FormatListNumberedIcon fontSize="small" />
         </IconButton>
       </Tooltip>
-      <Tooltip title={editor.isActive('link') ? 'Remove link' : 'Add link'}>
+      <Tooltip
+        title={
+          editor.isActive('link')
+            ? t('toolbar.removeLink')
+            : t('toolbar.addLink')
+        }
+      >
         <IconButton
           size="small"
           onClick={() => {
@@ -154,7 +162,7 @@ export default function EditorToolbar({
           )}
         </IconButton>
       </Tooltip>
-      <Tooltip title="Inline math">
+      <Tooltip title={t('toolbar.inlineMath')}>
         <IconButton
           size="small"
           onClick={() => onEditMath('inline')}
@@ -163,7 +171,7 @@ export default function EditorToolbar({
           <SuperscriptIcon fontSize="small" />
         </IconButton>
       </Tooltip>
-      <Tooltip title="Block math">
+      <Tooltip title={t('toolbar.blockMath')}>
         <IconButton
           size="small"
           onClick={() => onEditMath('block')}
@@ -172,12 +180,12 @@ export default function EditorToolbar({
           <FunctionsIcon fontSize="small" />
         </IconButton>
       </Tooltip>
-      <Tooltip title="Insert image">
+      <Tooltip title={t('toolbar.insertImage')}>
         <IconButton size="small" onClick={onInsertImage}>
           <ImageIcon fontSize="small" />
         </IconButton>
       </Tooltip>
-      <Tooltip title="Insert table">
+      <Tooltip title={t('toolbar.insertTable')}>
         <IconButton
           size="small"
           onClick={() =>
@@ -193,7 +201,7 @@ export default function EditorToolbar({
       </Tooltip>
       {editor.isActive('table') && (
         <>
-          <Tooltip title="Add row below">
+          <Tooltip title={t('toolbar.addRowBelow')}>
             <IconButton
               size="small"
               onClick={() => editor.chain().focus().addRowAfter().run()}
@@ -241,7 +249,7 @@ export default function EditorToolbar({
               </Box>
             </IconButton>
           </Tooltip>
-          <Tooltip title="Delete row">
+          <Tooltip title={t('toolbar.deleteRow')}>
             <IconButton
               size="small"
               onClick={() => editor.chain().focus().deleteRow().run()}
@@ -296,7 +304,7 @@ export default function EditorToolbar({
               </Box>
             </IconButton>
           </Tooltip>
-          <Tooltip title="Add column after">
+          <Tooltip title={t('toolbar.addColumnAfter')}>
             <IconButton
               size="small"
               onClick={() => editor.chain().focus().addColumnAfter().run()}
@@ -344,7 +352,7 @@ export default function EditorToolbar({
               </Box>
             </IconButton>
           </Tooltip>
-          <Tooltip title="Delete column">
+          <Tooltip title={t('toolbar.deleteColumn')}>
             <IconButton
               size="small"
               onClick={() => editor.chain().focus().deleteColumn().run()}
@@ -399,7 +407,7 @@ export default function EditorToolbar({
               </Box>
             </IconButton>
           </Tooltip>
-          <Tooltip title="Delete table">
+          <Tooltip title={t('toolbar.deleteTable')}>
             <IconButton
               size="small"
               onClick={() => editor.chain().focus().deleteTable().run()}
@@ -410,7 +418,7 @@ export default function EditorToolbar({
         </>
       )}
       <Box sx={{ flex: 1 }} />
-      <Tooltip title="Table of contents">
+      <Tooltip title={t('toolbar.toc')}>
         <IconButton
           size="small"
           onClick={onToggleToc}

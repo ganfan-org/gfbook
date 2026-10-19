@@ -27,14 +27,19 @@ import {
   MenuItem,
   ListItemIcon,
   Divider,
+  ToggleButton,
+  ToggleButtonGroup,
 } from '@mui/material'
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
 import { useState, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import SearchDialog from '../components/SearchDialog'
 import { useBooks } from '../hooks/useBooks'
+import { changeLang, currentLang, type AppLang } from '../i18n'
 import type { BookInfo } from '../types'
 import { readLogs, type LogEntry } from '../utils/commands'
+import { formatBookDate } from '../utils/date'
 
 // ═══════════════════════════════════════════
 // 封面颜色 — 低饱和高级色
@@ -58,20 +63,6 @@ function hashColor(title: string): [string, string] {
   return COVER_COLORS[Math.abs(hash) % COVER_COLORS.length]
 }
 
-function formatDate(ts: number): string {
-  if (!ts || ts <= 0) return ''
-  const d = new Date(ts)
-  const now = new Date()
-  const diff = now.getTime() - d.getTime()
-  if (diff < 24 * 60 * 60 * 1000) return '今天'
-  if (diff < 48 * 60 * 60 * 1000) return '昨天'
-  return d.toLocaleDateString('zh-CN', {
-    month: 'short',
-    day: 'numeric',
-    year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric',
-  })
-}
-
 // ═══════════════════════════════════════════
 // BookCover 组件 — Apple 风格低饱和封面
 // ═══════════════════════════════════════════
@@ -93,6 +84,7 @@ function BookCover({
   const [renameOpen, setRenameOpen] = useState(false)
   const [renameValue, setRenameValue] = useState(title)
   const [primary, secondary] = hashColor(title)
+  const { t } = useTranslation()
 
   const isLight = useMemo(() => {
     const hex = primary.replace('#', '')
@@ -223,7 +215,7 @@ function BookCover({
         </Box>
         <CardContent sx={{ px: 2, py: 1.25, '&:last-child': { pb: 1.25 } }}>
           <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.75rem' }}>
-            {formatDate(updatedTime)}
+            {formatBookDate(updatedTime)}
           </Typography>
         </CardContent>
       </Card>
@@ -237,26 +229,26 @@ function BookCover({
       >
         <MenuItem onClick={() => { setMenuAnchor(null); setRenameOpen(true); setRenameValue(title) }}>
           <ListItemIcon><DriveFileRenameOutlineIcon fontSize="small" /></ListItemIcon>
-          重命名
+          {t('bookshelf.rename')}
         </MenuItem>
         <MenuItem onClick={() => { setMenuAnchor(null); onDelete() }}>
           <ListItemIcon><DeleteIcon fontSize="small" color="error" /></ListItemIcon>
-          <Typography color="error" variant="body2">删除</Typography>
+          <Typography color="error" variant="body2">{t('common.delete')}</Typography>
         </MenuItem>
         <MenuItem onClick={() => { setMenuAnchor(null) }}>
           <ListItemIcon><FolderOpenOutlinedIcon fontSize="small" /></ListItemIcon>
-          在 Finder 中显示
+          {t('bookshelf.showInFinder')}
         </MenuItem>
       </Menu>
 
       {/* 重命名弹窗 */}
       <Dialog open={renameOpen} onClose={() => setRenameOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>重命名</DialogTitle>
+        <DialogTitle>{t('bookshelf.renameTitle')}</DialogTitle>
         <DialogContent>
           <TextField
             autoFocus
             margin="dense"
-            label="书名"
+            label={t('bookshelf.bookTitle')}
             fullWidth
             value={renameValue}
             onChange={e => setRenameValue(e.target.value)}
@@ -270,13 +262,13 @@ function BookCover({
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setRenameOpen(false)}>取消</Button>
+          <Button onClick={() => setRenameOpen(false)}>{t('common.cancel')}</Button>
           <Button
             onClick={() => { onRename(renameValue.trim()); setRenameOpen(false) }}
             variant="contained"
             disabled={!renameValue.trim() || renameValue.trim() === title}
           >
-            确认
+            {t('common.confirm')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -294,6 +286,8 @@ interface BookShelfProps {
 }
 
 export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelfProps) {
+  const { t } = useTranslation()
+  const [lang, setLang] = useState<AppLang>(() => currentLang())
   const { books, loading, createBook, removeBook, changeBookName, importExternalBook, getGlobalSettings, setGlobalSettings } = useBooks()
   const [newDialogOpen, setNewDialogOpen] = useState(false)
   const [newTitle, setNewTitle] = useState('')
@@ -366,23 +360,23 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
       {/* 顶部栏 */}
       <Box display="flex" alignItems="center" justifyContent="space-between" mb={4}>
         <Typography variant="h5" fontWeight={600}>
-          书架
+          {t('bookshelf.title')}
         </Typography>
         <Box display="flex" gap={1.5} alignItems="center">
           <Button variant="outlined" startIcon={<FolderOpenIcon />} onClick={handleImport}>
-            导入
+            {t('bookshelf.import')}
           </Button>
           <Button variant="contained" startIcon={<AddIcon />} onClick={() => setNewDialogOpen(true)}>
-            新建书
+            {t('bookshelf.newBook')}
           </Button>
-          <IconButton onClick={() => setSearchOpen(true)} aria-label="搜索">
+          <IconButton onClick={() => setSearchOpen(true)} aria-label={t('bookshelf.search')}>
             <SearchIcon />
           </IconButton>
-          <IconButton onClick={onToggleTheme} aria-label="切换主题">
+          <IconButton onClick={onToggleTheme} aria-label={t('bookshelf.toggleTheme')}>
             {mode === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
           </IconButton>
           <IconButton
-            aria-label="设置"
+            aria-label={t('bookshelf.settings')}
             onClick={async () => {
               try {
                 const s = await getGlobalSettings()
@@ -427,17 +421,17 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
             <AddIcon sx={{ fontSize: 40, color: 'text.secondary', opacity: 0.4 }} />
           </Box>
           <Typography variant="h6" color="text.primary" fontWeight={600}>
-            还没有书
+            {t('bookshelf.emptyTitle')}
           </Typography>
           <Typography color="text.secondary" sx={{ maxWidth: 360 }}>
-            创建第一本书来开始写作，或导入已有的 gfbook 项目
+            {t('bookshelf.emptyHint')}
           </Typography>
           <Box display="flex" gap={1} mt={1}>
             <Button variant="contained" size="large" startIcon={<AddIcon />} onClick={() => setNewDialogOpen(true)}>
-              创建书
+              {t('bookshelf.createBook')}
             </Button>
             <Button variant="outlined" size="large" startIcon={<FolderOpenIcon />} onClick={handleImport}>
-              导入书
+              {t('bookshelf.importBook')}
             </Button>
           </Box>
         </Box>
@@ -458,12 +452,12 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
 
       {/* 新建书弹窗 */}
       <Dialog open={newDialogOpen} onClose={() => !creating && setNewDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>新建书</DialogTitle>
+        <DialogTitle>{t('bookshelf.newBook')}</DialogTitle>
         <DialogContent>
           <TextField
             autoFocus
             margin="dense"
-            label="书名"
+            label={t('bookshelf.bookTitle')}
             fullWidth
             value={newTitle}
             onChange={e => setNewTitle(e.target.value)}
@@ -477,35 +471,35 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setNewDialogOpen(false)} disabled={creating}>取消</Button>
+          <Button onClick={() => setNewDialogOpen(false)} disabled={creating}>{t('common.cancel')}</Button>
           <Button
             onClick={handleNewBook}
             variant="contained"
             disabled={!newTitle.trim() || creating}
           >
-            {creating ? '创建中…' : '创建'}
+            {creating ? t('bookshelf.creating') : t('common.create')}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* 设置弹窗：全局 Git 作者、代理与活动日志 */}
       <Dialog open={settingsOpen} onClose={() => setSettingsOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>设置</DialogTitle>
+        <DialogTitle>{t('settings.title')}</DialogTitle>
         <DialogContent>
-          <Typography variant="subtitle2" gutterBottom>Git 作者</Typography>
+          <Typography variant="subtitle2" gutterBottom>{t('settings.gitAuthor')}</Typography>
           <Box display="flex" gap={1} mb={2}>
             <TextField
               size="small"
-              label="姓名"
-              placeholder="Your Name"
+              label={t('settings.name')}
+              placeholder={t('settings.namePlaceholder')}
               value={globalGitName}
               onChange={e => setGlobalGitName(e.target.value)}
               sx={{ flex: 1 }}
             />
             <TextField
               size="small"
-              label="邮箱"
-              placeholder="you@example.com"
+              label={t('settings.email')}
+              placeholder={t('settings.emailPlaceholder')}
               value={globalGitEmail}
               onChange={e => setGlobalGitEmail(e.target.value)}
               sx={{ flex: 1 }}
@@ -514,20 +508,37 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
 
           <Divider sx={{ my: 2 }} />
 
-          <Typography variant="subtitle2" gutterBottom>代理</Typography>
+          <Typography variant="subtitle2" gutterBottom>{t('settings.proxy')}</Typography>
           <TextField
             size="small"
             fullWidth
-            placeholder="http://proxy:8080"
+            placeholder={t('settings.proxyPlaceholder')}
             value={globalProxy}
             onChange={e => setGlobalProxy(e.target.value)}
           />
 
           <Divider sx={{ my: 2 }} />
 
-          <Typography variant="subtitle2" gutterBottom>活动日志</Typography>
+          <Typography variant="subtitle2" gutterBottom>{t('settings.language')}</Typography>
+          <ToggleButtonGroup
+            size="small"
+            exclusive
+            value={lang}
+            onChange={(_, value: AppLang | null) => {
+              if (!value) return
+              setLang(value)
+              changeLang(value)
+            }}
+          >
+            <ToggleButton value="zh">中文</ToggleButton>
+            <ToggleButton value="en">English</ToggleButton>
+          </ToggleButtonGroup>
+
+          <Divider sx={{ my: 2 }} />
+
+          <Typography variant="subtitle2" gutterBottom>{t('settings.activityLog')}</Typography>
           {logs.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">暂无日志</Typography>
+            <Typography variant="body2" color="text.secondary">{t('settings.noLogs')}</Typography>
           ) : (
             <Box
               sx={{
@@ -578,7 +589,7 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setSettingsOpen(false)}>取消</Button>
+          <Button onClick={() => setSettingsOpen(false)}>{t('common.cancel')}</Button>
           <Button
             variant="contained"
             onClick={async () => {
@@ -590,7 +601,7 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
               }
             }}
           >
-            保存
+            {t('common.save')}
           </Button>
         </DialogActions>
       </Dialog>

@@ -1,9 +1,8 @@
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
-import SettingsIcon from '@mui/icons-material/Settings'
-import FolderOpenIcon from '@mui/icons-material/FolderOpen'
 import SearchIcon from '@mui/icons-material/Search'
+import SettingsIcon from '@mui/icons-material/Settings'
 import {
   Box,
   Typography,
@@ -18,15 +17,16 @@ import {
 } from '@mui/material'
 import { listen } from '@tauri-apps/api/event'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
+import BookSettingsDialog from '../components/BookSettingsDialog'
 import ChapterEditor from '../components/ChapterEditor'
 import ChapterTree from '../components/ChapterTree'
-import BookSettingsDialog from '../components/BookSettingsDialog'
 import SearchDialog from '../components/SearchDialog'
 import { useBook } from '../hooks/useBook'
+import type { BookInfo, Chapter } from '../types'
 import {
   revealInFinder,
-  gitListConflicted,
   resolveConflict,
   attemptMerge,
   readBookLogs,
@@ -34,7 +34,6 @@ import {
   renameBook,
 } from '../utils/commands'
 import type { LogEntry } from '../utils/commands'
-import type { BookInfo, Chapter } from '../types'
 
 interface BookDetailProps {
   bookInfo: BookInfo
@@ -47,6 +46,7 @@ export default function BookDetail({
   initialChapterId,
   onBack,
 }: BookDetailProps) {
+  const { t } = useTranslation()
   const bookPath = bookInfo.path
   const {
     meta,
@@ -616,12 +616,12 @@ export default function BookDetail({
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle>New Chapter</DialogTitle>
+        <DialogTitle>{t('bookDetail.newChapter')}</DialogTitle>
         <DialogContent>
           <TextField
             autoFocus
             margin="dense"
-            label="Chapter Title"
+            label={t('bookDetail.chapterTitle')}
             fullWidth
             value={addTitle}
             onChange={(e) => setAddTitle(e.target.value)}
@@ -629,13 +629,15 @@ export default function BookDetail({
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setAddDialogOpen(false)}>Cancel</Button>
+          <Button onClick={() => setAddDialogOpen(false)}>
+            {t('common.cancel')}
+          </Button>
           <Button
             onClick={handleCreateChapter}
             variant="contained"
             disabled={!addTitle.trim()}
           >
-            Create
+            {t('common.create')}
           </Button>
         </DialogActions>
       </Dialog>

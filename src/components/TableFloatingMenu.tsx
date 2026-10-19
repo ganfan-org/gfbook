@@ -4,6 +4,7 @@ import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline'
 import { Box, IconButton, Tooltip } from '@mui/material'
 import type { Editor } from '@tiptap/core'
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 interface Props {
   editor: Editor | null
@@ -14,6 +15,7 @@ export default function TableFloatingMenu({
   editor,
   scrollContainerRef,
 }: Props) {
+  const { t } = useTranslation()
   const [visible, setVisible] = useState(false)
   const [pos, setPos] = useState({ top: 0, left: 0 })
   const menuRef = useRef<HTMLDivElement>(null)
@@ -71,7 +73,7 @@ export default function TableFloatingMenu({
       }}
       onClick={(e) => e.stopPropagation()}
     >
-      <Tooltip title="Add row below">
+      <Tooltip title={t('toolbar.addRowBelow')}>
         <IconButton
           size="small"
           onClick={() => editor.chain().focus().addRowAfter().run()}
@@ -79,7 +81,7 @@ export default function TableFloatingMenu({
           <AddCircleOutlineIcon sx={{ fontSize: 16 }} />
         </IconButton>
       </Tooltip>
-      <Tooltip title="Delete row">
+      <Tooltip title={t('toolbar.deleteRow')}>
         <IconButton
           size="small"
           onClick={() => editor.chain().focus().deleteRow().run()}
@@ -87,7 +89,7 @@ export default function TableFloatingMenu({
           <RemoveCircleOutlineIcon sx={{ fontSize: 16 }} />
         </IconButton>
       </Tooltip>
-      <Tooltip title="Add column after">
+      <Tooltip title={t('toolbar.addColumnAfter')}>
         <IconButton
           size="small"
           onClick={() => editor.chain().focus().addColumnAfter().run()}
@@ -95,7 +97,7 @@ export default function TableFloatingMenu({
           <AddCircleOutlineIcon sx={{ fontSize: 16 }} />
         </IconButton>
       </Tooltip>
-      <Tooltip title="Delete column">
+      <Tooltip title={t('toolbar.deleteColumn')}>
         <IconButton
           size="small"
           onClick={() => editor.chain().focus().deleteColumn().run()}
@@ -103,7 +105,7 @@ export default function TableFloatingMenu({
           <RemoveCircleOutlineIcon sx={{ fontSize: 16 }} />
         </IconButton>
       </Tooltip>
-      <Tooltip title="Delete table">
+      <Tooltip title={t('toolbar.deleteTable')}>
         <IconButton
           size="small"
           onClick={() => editor.chain().focus().deleteTable().run()}

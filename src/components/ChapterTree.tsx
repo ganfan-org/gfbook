@@ -1,4 +1,9 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import AddIcon from '@mui/icons-material/Add';
+import DeleteIcon from '@mui/icons-material/Delete';
+import DescriptionIcon from '@mui/icons-material/Description';
+import DriveFileRenameOutlineIcon from '@mui/icons-material/DriveFileRenameOutline';
+import FolderIcon from '@mui/icons-material/Folder';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
 import {
   Box,
   Typography,
@@ -13,12 +18,8 @@ import {
   DialogContent,
   DialogActions,
 } from '@mui/material';
-import FolderIcon from '@mui/icons-material/Folder';
-import DescriptionIcon from '@mui/icons-material/Description';
-import MoreVertIcon from '@mui/icons-material/MoreVert';
-import AddIcon from '@mui/icons-material/Add';
-import DriveFileRenameOutlineIcon from '@mui/icons-material/DriveFileRenameOutline';
-import DeleteIcon from '@mui/icons-material/Delete';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import type { Chapter } from '../types';
 
@@ -50,6 +51,7 @@ function ChapterItem(props: {
   onRequestRename: (id: string, title: string) => void;
 }) {
   const { chapter, depth, selectedId, onSelect, onAddChild, onRename, onDelete, onMoveUp, onMoveDown, dragOverId, dropPos, onItemMouseDown, onRequestRename } = props;
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
   const hasChildren = chapter.chapters.length > 0;
@@ -108,14 +110,14 @@ function ChapterItem(props: {
 
         <Menu anchorEl={menuAnchor} open={!!menuAnchor} onClose={() => setMenuAnchor(null)} onClick={(e) => e.stopPropagation()}>
           <MenuItem onClick={() => { setMenuAnchor(null); onAddChild(chapter.id); }}>
-            <ListItemIcon><AddIcon fontSize="small" /></ListItemIcon>Add sub-chapter
+            <ListItemIcon><AddIcon fontSize="small" /></ListItemIcon>{t('tree.addSub')}
           </MenuItem>
           <MenuItem onClick={() => { setMenuAnchor(null); onRequestRename(chapter.id, chapter.title); }}>
-            <ListItemIcon><DriveFileRenameOutlineIcon fontSize="small" /></ListItemIcon>Rename
+            <ListItemIcon><DriveFileRenameOutlineIcon fontSize="small" /></ListItemIcon>{t('common.rename')}
           </MenuItem>
           <MenuItem onClick={() => { setMenuAnchor(null); onDelete(chapter.id); }}>
             <ListItemIcon><DeleteIcon fontSize="small" color="error" /></ListItemIcon>
-            <Typography color="error" variant="body2">Delete</Typography>
+            <Typography color="error" variant="body2">{t('common.delete')}</Typography>
           </MenuItem>
         </Menu>
       </Box>
@@ -140,6 +142,7 @@ function ChapterItem(props: {
 }
 
 export default function ChapterTree({ chapters, selectedId, onSelect, onAddChild, onRename, onDelete, onMoveUp, onMoveDown, onMoveChapter }: ChapterTreeProps) {
+  const { t } = useTranslation();
   const [renameDialog, setRenameDialog] = useState<{ id: string; title: string } | null>(null);
   const [renameDialogValue, setRenameDialogValue] = useState('');
 
@@ -276,25 +279,25 @@ export default function ChapterTree({ chapters, selectedId, onSelect, onAddChild
   return (
     <Box>
       <Box display="flex" alignItems="center" justifyContent="space-between" mb={1} px={1}>
-        <Typography variant="subtitle2" color="text.secondary">Chapters</Typography>
-        <Button size="small" startIcon={<AddIcon />} onClick={() => onAddChild(null)}>Add</Button>
+        <Typography variant="subtitle2" color="text.secondary">{t('tree.chapters')}</Typography>
+        <Button size="small" startIcon={<AddIcon />} onClick={() => onAddChild(null)}>{t('tree.add')}</Button>
       </Box>
 
       {chapters.length === 0 ? (
         <Typography variant="body2" color="text.secondary" textAlign="center" py={4}>
-          No chapters yet.
+          {t('tree.noChapters')}
         </Typography>
       ) : (
         renderChapterItems(chapters, 0)
       )}
 
       <Dialog open={!!renameDialog} onClose={() => setRenameDialog(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Rename Chapter</DialogTitle>
+        <DialogTitle>{t('tree.renameChapter')}</DialogTitle>
         <DialogContent>
           <TextField
             autoFocus
             margin="dense"
-            label="Chapter Title"
+            label={t('tree.chapterTitle')}
             fullWidth
             value={renameDialogValue}
             onChange={(e) => setRenameDialogValue(e.target.value)}
@@ -302,9 +305,9 @@ export default function ChapterTree({ chapters, selectedId, onSelect, onAddChild
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setRenameDialog(null)}>Cancel</Button>
+          <Button onClick={() => setRenameDialog(null)}>{t('common.cancel')}</Button>
           <Button onClick={handleRenameConfirm} variant="contained" disabled={!renameDialogValue.trim()}>
-            Rename
+            {t('common.rename')}
           </Button>
         </DialogActions>
       </Dialog>

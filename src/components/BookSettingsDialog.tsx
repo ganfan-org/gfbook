@@ -16,7 +16,10 @@ import {
   Typography,
 } from '@mui/material'
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
+
 import type { LogEntry } from '../utils/commands'
+import { formatBookDate } from '../utils/date'
 
 interface BookSettingsDialogProps {
   open: boolean
@@ -89,6 +92,7 @@ export default function BookSettingsDialog({
   onRefreshLogs = async () => [],
   tabs = ['info', 'git', 'log'],
 }: BookSettingsDialogProps) {
+  const { t } = useTranslation()
   const [tab, setTab] = useState(tabs[0])
   const [renameValue, setRenameValue] = useState(bookTitle)
   const [dialogLogs, setDialogLogs] = useState<LogEntry[]>(logs)
@@ -100,30 +104,23 @@ export default function BookSettingsDialog({
     await onRename(renameValue.trim())
   }
 
-  const formatDate = (ts: number) => {
-    const d = new Date(ts * 1000)
-    if (d.getTime() <= 0) return ''
-    const diff = Date.now() - d.getTime()
-    if (diff < 24 * 60 * 60 * 1000) return 'Today'
-    if (diff < 48 * 60 * 60 * 1000) return 'Yesterday'
-    return d.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    })
-  }
-
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle sx={{ pb: 0 }}>Settings</DialogTitle>
+      <DialogTitle sx={{ pb: 0 }}>{t('bookSettings.title')}</DialogTitle>
       <Tabs
         value={tab}
         onChange={(_, v) => setTab(v)}
         sx={{ px: 2, borderBottom: 1, borderColor: 'divider' }}
       >
-        {tabs.includes('info') && <Tab label="Info" value="info" />}
-        {tabs.includes('git') && <Tab label="Git" value="git" />}
-        {tabs.includes('log') && <Tab label="Log" value="log" />}
+        {tabs.includes('info') && (
+          <Tab label={t('bookSettings.tabInfo')} value="info" />
+        )}
+        {tabs.includes('git') && (
+          <Tab label={t('bookSettings.tabGit')} value="git" />
+        )}
+        {tabs.includes('log') && (
+          <Tab label={t('bookSettings.tabLog')} value="log" />
+        )}
       </Tabs>
       <DialogContent sx={{ pt: 2 }}>
         {tab === 'info' && (
@@ -150,10 +147,10 @@ export default function BookSettingsDialog({
                 onClick={onRevealInFinder}
               >
                 {navigator.platform.includes('Win')
-                  ? 'Show in Explorer'
+                  ? t('bookSettings.showInExplorer')
                   : navigator.platform.includes('Mac')
-                    ? 'Reveal in Finder'
-                    : 'Open Folder'}
+                    ? t('bookSettings.revealInFinder')
+                    : t('bookSettings.openFolder')}
               </Button>
             </Box>
             {updatedTime > 0 && (
@@ -163,14 +160,14 @@ export default function BookSettingsDialog({
                 display="block"
                 mt={1}
               >
-                Updated: {formatDate(updatedTime)}
+                {t('bookSettings.updated')}: {formatBookDate(updatedTime)}
               </Typography>
             )}
 
             <Divider sx={{ my: 2 }} />
 
             <Typography variant="subtitle2" gutterBottom>
-              Rename
+              {t('bookSettings.rename')}
             </Typography>
             <Box display="flex" gap={1}>
               <TextField
@@ -190,7 +187,7 @@ export default function BookSettingsDialog({
                 }
                 onClick={handleRename}
               >
-                Rename
+                {t('bookSettings.rename')}
               </Button>
             </Box>
 
@@ -202,7 +199,7 @@ export default function BookSettingsDialog({
               sx={{ mt: 2 }}
               onClick={onDelete}
             >
-              Delete Book
+              {t('bookSettings.deleteBook')}
             </Button>
           </Box>
         )}
@@ -220,7 +217,9 @@ export default function BookSettingsDialog({
                 }}
               >
                 <CircularProgress size={16} />
-                <Typography variant="body2">Loading git data...</Typography>
+                <Typography variant="body2">
+                  {t('bookSettings.loadingGit')}
+                </Typography>
               </Box>
             ) : (
               <>
@@ -260,7 +259,7 @@ export default function BookSettingsDialog({
                 <Divider sx={{ my: 1.5 }} />
 
                 <Typography variant="subtitle2" gutterBottom>
-                  Changes
+                  {t('bookSettings.changes')}
                 </Typography>
                 <Typography
                   variant="body2"
@@ -272,14 +271,14 @@ export default function BookSettingsDialog({
                     whiteSpace: 'pre-wrap',
                   }}
                 >
-                  {gitStatusText || 'No changes'}
+                  {gitStatusText || t('bookSettings.noChanges')}
                 </Typography>
 
                 {gitStatusText && (
                   <>
                     <TextField
                       size="small"
-                      label="Commit Message"
+                      label={t('bookSettings.commitMessage')}
                       fullWidth
                       multiline
                       rows={2}
@@ -298,7 +297,7 @@ export default function BookSettingsDialog({
                       size="small"
                       disabled={!commitMessage.trim()}
                     >
-                      Commit
+                      {t('bookSettings.commit')}
                     </Button>
                   </>
                 )}
@@ -306,7 +305,7 @@ export default function BookSettingsDialog({
                 <Divider sx={{ my: 2 }} />
 
                 <Typography variant="subtitle2" gutterBottom>
-                  Remote
+                  {t('bookSettings.remote')}
                 </Typography>
                 {remoteUrl && (
                   <Typography
@@ -336,14 +335,14 @@ export default function BookSettingsDialog({
                     variant="outlined"
                     onClick={onLoadRemote}
                   >
-                    Load
+                    {t('bookSettings.load')}
                   </Button>
                   <Button
                     size="small"
                     variant="outlined"
                     onClick={onSetRemoteUrl}
                   >
-                    Set URL
+                    {t('bookSettings.setUrl')}
                   </Button>
                 </Box>
 
@@ -354,7 +353,9 @@ export default function BookSettingsDialog({
                     disabled={!!syncingType}
                     onClick={onFetch}
                   >
-                    {syncingType === 'fetch' ? 'Fetching...' : 'Fetch'}
+                    {syncingType === 'fetch'
+                      ? t('bookSettings.fetching')
+                      : t('bookSettings.fetch')}
                   </Button>
                   <Button
                     size="small"
@@ -362,7 +363,9 @@ export default function BookSettingsDialog({
                     disabled={!!syncingType}
                     onClick={onPull}
                   >
-                    {syncingType === 'pull' ? 'Pulling...' : 'Pull'}
+                    {syncingType === 'pull'
+                      ? t('bookSettings.pulling')
+                      : t('bookSettings.pull')}
                   </Button>
                   <Button
                     size="small"
@@ -370,7 +373,9 @@ export default function BookSettingsDialog({
                     disabled={!!syncingType}
                     onClick={onPush}
                   >
-                    {syncingType === 'push' ? 'Pushing...' : 'Push'}
+                    {syncingType === 'push'
+                      ? t('bookSettings.pushing')
+                      : t('bookSettings.push')}
                   </Button>
                   <Button
                     size="small"
@@ -379,7 +384,9 @@ export default function BookSettingsDialog({
                     disabled={!!syncingType || mergeInProgress}
                     onClick={onMerge}
                   >
-                    {mergeInProgress ? 'Merging...' : 'Merge'}
+                    {mergeInProgress
+                      ? t('bookSettings.merging')
+                      : t('bookSettings.merge')}
                   </Button>
                 </Box>
 
@@ -387,7 +394,7 @@ export default function BookSettingsDialog({
                   <Box mt={1} mb={1}>
                     <Divider sx={{ my: 1 }} />
                     <Typography variant="subtitle2" color="error" gutterBottom>
-                      Conflicted Files
+                      {t('bookSettings.conflictedFiles')}
                     </Typography>
                     {conflictedFiles.map((file) => (
                       <Box
@@ -419,7 +426,7 @@ export default function BookSettingsDialog({
                           onClick={() => onResolveFile(file, true)}
                           disabled={resolvedFiles.has(file)}
                         >
-                          Remote
+                          {t('bookSettings.useRemote')}
                         </Button>
                         <Button
                           size="small"
@@ -429,7 +436,7 @@ export default function BookSettingsDialog({
                           onClick={() => onResolveFile(file, false)}
                           disabled={resolvedFiles.has(file)}
                         >
-                          Local
+                          {t('bookSettings.useLocal')}
                         </Button>
                       </Box>
                     ))}
@@ -440,7 +447,7 @@ export default function BookSettingsDialog({
                         sx={{ mt: 1 }}
                         onClick={onCommitMerge}
                       >
-                        Commit Merge
+                        {t('bookSettings.commitMerge')}
                       </Button>
                     )}
                   </Box>
@@ -460,11 +467,11 @@ export default function BookSettingsDialog({
               }}
               sx={{ mb: 1 }}
             >
-              Refresh
+              {t('common.refresh')}
             </Button>
             {displayLogs.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
-                No logs
+                {t('bookSettings.noLogs')}
               </Typography>
             ) : (
               <Box
@@ -524,7 +531,7 @@ export default function BookSettingsDialog({
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>Close</Button>
+        <Button onClick={onClose}>{t('common.close')}</Button>
       </DialogActions>
     </Dialog>
   )

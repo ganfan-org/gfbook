@@ -11,6 +11,8 @@ import {
 } from '@mui/material'
 import { listen } from '@tauri-apps/api/event'
 import { useCallback, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+
 import type { SearchMatch, SearchProgressEvent } from '../utils/commands'
 import { startSearch } from '../utils/commands'
 
@@ -35,6 +37,7 @@ export default function SearchDialog({
   bookPaths,
   onSelectChapter,
 }: SearchDialogProps) {
+  const { t } = useTranslation()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
   const [done, setDone] = useState(true)
@@ -109,7 +112,7 @@ export default function SearchDialog({
         <TextField
           inputRef={inputRef}
           fullWidth
-          placeholder="Search full text..."
+          placeholder={t('search.placeholder')}
           value={query}
           onChange={(e) => handleQueryChange(e.target.value)}
           variant="standard"
@@ -125,12 +128,12 @@ export default function SearchDialog({
       <DialogContent>
         {!done && (
           <Typography variant="caption" color="text.secondary">
-            Searching... ({results.length} chapters matched)
+            {t('search.searching', { n: results.length })}
           </Typography>
         )}
         {done && query.trim() && results.length === 0 && (
           <Typography variant="body2" color="text.secondary">
-            No results
+            {t('search.noResults')}
           </Typography>
         )}
         {results.length > 0 && (
@@ -164,7 +167,7 @@ export default function SearchDialog({
                       fontSize: '0.7rem',
                     }}
                   >
-                    Ln {m.line}: {m.text}
+                    {t('search.line', { n: m.line })}: {m.text}
                   </Typography>
                 ))}
                 {r.matches.length > 3 && (
@@ -173,7 +176,7 @@ export default function SearchDialog({
                     color="text.secondary"
                     sx={{ pl: 1 }}
                   >
-                    ... +{r.matches.length - 3} more
+                    {t('search.more', { n: r.matches.length - 3 })}
                   </Typography>
                 )}
               </Box>
@@ -182,7 +185,7 @@ export default function SearchDialog({
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={handleClose}>Close</Button>
+        <Button onClick={handleClose}>{t('common.close')}</Button>
       </DialogActions>
     </Dialog>
   )

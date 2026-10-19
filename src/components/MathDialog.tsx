@@ -8,6 +8,7 @@ import {
   TextField,
 } from '@mui/material'
 import type { Dispatch, SetStateAction } from 'react'
+import { useTranslation } from 'react-i18next'
 
 interface MathPreviewProps {
   latex: string
@@ -44,6 +45,7 @@ export default function MathDialog({
   typeName,
   onSubmit,
 }: MathDialogProps) {
+  const { t } = useTranslation()
   const isBlock = typeName === 'blockMath'
 
   return (
@@ -59,12 +61,14 @@ export default function MathDialog({
         }
       }}
     >
-      <DialogTitle>{isBlock ? 'Block Math' : 'Inline Math'}</DialogTitle>
+      <DialogTitle>
+        {isBlock ? t('editor.blockMath') : t('editor.inlineMath')}
+      </DialogTitle>
       <DialogContent>
         <TextField
           autoFocus
           margin="dense"
-          label="LaTeX"
+          label={t('editor.latex')}
           fullWidth
           multiline={isBlock}
           rows={isBlock ? 3 : 1}
@@ -99,9 +103,9 @@ export default function MathDialog({
         </Box>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
+        <Button onClick={onClose}>{t('common.cancel')}</Button>
         <Button onClick={onSubmit} variant="contained" disabled={!latex.trim()}>
-          Update
+          {t('common.update')}
         </Button>
       </DialogActions>
     </Dialog>
