@@ -119,6 +119,7 @@ const en: typeof zh = {
   bookDetail: {
     newChapter: 'New Chapter',
     chapterTitle: 'Chapter Title',
+    selectChapter: 'Select a chapter from the sidebar to start editing',
   },
   editor: {
     loadingEditor: 'Loading editor...',

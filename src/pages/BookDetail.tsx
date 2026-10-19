@@ -1,6 +1,6 @@
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
+import HomeIcon from '@mui/icons-material/Home'
 import SearchIcon from '@mui/icons-material/Search'
 import SettingsIcon from '@mui/icons-material/Settings'
 import {
@@ -387,14 +387,23 @@ export default function BookDetail({
         >
           <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
             <IconButton onClick={onBack} size="small">
-              <ArrowBackIcon />
+              <HomeIcon />
             </IconButton>
-            <IconButton onClick={() => setSearchOpen(true)} size="small">
-              <SearchIcon />
-            </IconButton>
-            <Typography variant="h6" fontWeight={600} noWrap sx={{ flex: 1 }}>
+            <Typography
+              variant="h6"
+              fontWeight={600}
+              noWrap
+              sx={{ flex: 1, minWidth: 0 }}
+            >
               {localTitle}
             </Typography>
+            <IconButton
+              onClick={() => setSearchOpen(true)}
+              size="small"
+              sx={{ flexShrink: 0 }}
+            >
+              <SearchIcon />
+            </IconButton>
           </Box>
           <Divider />
           <Box sx={{ flex: 1, overflow: 'auto', p: 1 }}>
@@ -540,9 +549,7 @@ export default function BookDetail({
               color: 'text.secondary',
             }}
           >
-            <Typography variant="h6">
-              Select a chapter from the sidebar to start editing
-            </Typography>
+            <Typography variant="h6">{t('bookDetail.selectChapter')}</Typography>
           </Box>
         )}
       </Box>

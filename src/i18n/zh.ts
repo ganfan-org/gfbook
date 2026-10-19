@@ -117,6 +117,7 @@ const zh = {
   bookDetail: {
     newChapter: '新建章节',
     chapterTitle: '章节标题',
+    selectChapter: '从左侧目录选择章节开始编辑',
   },
   editor: {
     loadingEditor: '编辑器加载中…',
