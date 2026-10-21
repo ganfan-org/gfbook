@@ -33,7 +33,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
 uuid = { version = "1", features = ["v4"] }
-git2 = "0.19"
+# vendored-openssl: statically link OpenSSL so release builds don't depend on
+# Homebrew's /opt/homebrew/opt/openssl@3 dylibs (which other Macs don't have,
+# and which hardened-runtime library validation would reject anyway).
+git2 = { version = "0.19", features = ["vendored-libgit2", "vendored-openssl"] }
 reqwest = { version = "0.12", features = ["blocking"] }
 url = "2"
 chrono = { version = "0.4", features = ["serde"] }
