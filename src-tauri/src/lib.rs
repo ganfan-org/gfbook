@@ -17,6 +17,8 @@ pub fn run() {
             delete_book,
             rename_book,
             import_book,
+            scan_markdown_dir,
+            import_markdown_dir,
             get_books_dir_info,
             set_books_dir,
             get_book_meta,
@@ -58,6 +60,9 @@ pub fn run() {
             read_logs,
             read_book_logs,
             start_search,
+            export_site,
+            read_site_templates,
+            install_example_templates,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

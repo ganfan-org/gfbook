@@ -1,7 +1,9 @@
 import AddIcon from '@mui/icons-material/Add'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
 import DeleteIcon from '@mui/icons-material/Delete'
+import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined'
 import DriveFileRenameOutlineIcon from '@mui/icons-material/DriveFileRenameOutline'
+import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined'
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'
 import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined'
 import LightModeIcon from '@mui/icons-material/LightMode'
@@ -34,6 +36,8 @@ import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
 import { useState, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import ExportDialog from '../components/ExportDialog'
+import ImportMarkdownDialog from '../components/ImportMarkdownDialog'
 import SearchDialog from '../components/SearchDialog'
 import { useBooks } from '../hooks/useBooks'
 import { changeLang, currentLang, type AppLang } from '../i18n'
@@ -72,12 +76,14 @@ function BookCover({
   onClick,
   onRename,
   onDelete,
+  onExport,
 }: {
   title: string
   updatedTime: number
   onClick: () => void
   onRename: (t: string) => void
   onDelete: () => void
+  onExport: () => void
 }) {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
   const [menuHover, setMenuHover] = useState(false)
@@ -231,6 +237,10 @@ function BookCover({
           <ListItemIcon><DriveFileRenameOutlineIcon fontSize="small" /></ListItemIcon>
           {t('bookshelf.rename')}
         </MenuItem>
+        <MenuItem onClick={() => { setMenuAnchor(null); onExport() }}>
+          <ListItemIcon><FileDownloadOutlinedIcon fontSize="small" /></ListItemIcon>
+          {t('bookshelf.export')}
+        </MenuItem>
         <MenuItem onClick={() => { setMenuAnchor(null); onDelete() }}>
           <ListItemIcon><DeleteIcon fontSize="small" color="error" /></ListItemIcon>
           <Typography color="error" variant="body2">{t('common.delete')}</Typography>
@@ -288,12 +298,16 @@ interface BookShelfProps {
 export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelfProps) {
   const { t } = useTranslation()
   const [lang, setLang] = useState<AppLang>(() => currentLang())
-  const { books, loading, createBook, removeBook, changeBookName, importExternalBook, getGlobalSettings, setGlobalSettings } = useBooks()
+  const { books, loading, createBook, removeBook, changeBookName, importExternalBook, importMarkdownBook, getGlobalSettings, setGlobalSettings } = useBooks()
   const [newDialogOpen, setNewDialogOpen] = useState(false)
   const [newTitle, setNewTitle] = useState('')
   const [creating, setCreating] = useState(false)
   const [deletingPath, setDeletingPath] = useState<string | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
+  const [exportPreselect, setExportPreselect] = useState<string[]>([])
+  const [importMenuAnchor, setImportMenuAnchor] = useState<HTMLElement | null>(null)
+  const [importMdOpen, setImportMdOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [globalGitName, setGlobalGitName] = useState('')
   const [globalGitEmail, setGlobalGitEmail] = useState('')
@@ -363,12 +377,25 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
           {t('bookshelf.title')}
         </Typography>
         <Box display="flex" gap={1.5} alignItems="center">
-          <Button variant="outlined" startIcon={<FolderOpenIcon />} onClick={handleImport}>
+          <Button
+            variant="outlined"
+            startIcon={<FolderOpenIcon />}
+            onClick={e => setImportMenuAnchor(e.currentTarget)}
+          >
             {t('bookshelf.import')}
           </Button>
           <Button variant="contained" startIcon={<AddIcon />} onClick={() => setNewDialogOpen(true)}>
             {t('bookshelf.newBook')}
           </Button>
+          <IconButton
+            onClick={() => {
+              setExportPreselect(books.map(b => b.path))
+              setExportOpen(true)
+            }}
+            aria-label={t('bookshelf.export')}
+          >
+            <FileDownloadOutlinedIcon />
+          </IconButton>
           <IconButton onClick={() => setSearchOpen(true)} aria-label={t('bookshelf.search')}>
             <SearchIcon />
           </IconButton>
@@ -399,6 +426,32 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
           </IconButton>
         </Box>
       </Box>
+
+      {/* 导入菜单：已有 gfbook 项目 / 普通 Markdown 目录 */}
+      <Menu
+        anchorEl={importMenuAnchor}
+        open={!!importMenuAnchor}
+        onClose={() => setImportMenuAnchor(null)}
+      >
+        <MenuItem
+          onClick={() => {
+            setImportMenuAnchor(null)
+            handleImport()
+          }}
+        >
+          <ListItemIcon><FolderOpenIcon fontSize="small" /></ListItemIcon>
+          {t('bookshelf.importBook')}
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            setImportMenuAnchor(null)
+            setImportMdOpen(true)
+          }}
+        >
+          <ListItemIcon><DescriptionOutlinedIcon fontSize="small" /></ListItemIcon>
+          {t('bookshelf.importMarkdown')}
+        </MenuItem>
+      </Menu>
 
       {books.length === 0 ? (
         <Box
@@ -433,6 +486,14 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
             <Button variant="outlined" size="large" startIcon={<FolderOpenIcon />} onClick={handleImport}>
               {t('bookshelf.importBook')}
             </Button>
+            <Button
+              variant="outlined"
+              size="large"
+              startIcon={<DescriptionOutlinedIcon />}
+              onClick={() => setImportMdOpen(true)}
+            >
+              {t('bookshelf.importMarkdown')}
+            </Button>
           </Box>
         </Box>
       ) : (
@@ -445,6 +506,10 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
               onClick={() => onOpenBook(book)}
               onRename={newTitle => handleRename(book.path, newTitle)}
               onDelete={() => handleDelete(book.path)}
+              onExport={() => {
+                setExportPreselect([book.path])
+                setExportOpen(true)
+              }}
             />
           ))}
         </Box>
@@ -605,6 +670,19 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
           </Button>
         </DialogActions>
       </Dialog>
+
+      <ExportDialog
+        open={exportOpen}
+        books={books}
+        preselect={exportPreselect}
+        onClose={() => setExportOpen(false)}
+      />
+
+      <ImportMarkdownDialog
+        open={importMdOpen}
+        onClose={() => setImportMdOpen(false)}
+        onImport={importMarkdownBook}
+      />
 
       <SearchDialog
         open={searchOpen}

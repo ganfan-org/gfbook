@@ -11,9 +11,16 @@ pub struct Chapter {
     pub chapters: Vec<Chapter>,
 }
 
+fn default_schema_version() -> u32 {
+    1
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BookMeta {
     pub title: String,
+    /// 书库格式版本；旧书缺失时按 1 处理，并在下次保存时写回
+    #[serde(default = "default_schema_version")]
+    pub schema_version: u32,
     #[serde(default)]
     pub created_time: u64,
     #[serde(default)]

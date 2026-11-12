@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "gfbook 书库元数据",
+  "description": "每本书目录下 gfbook.yaml 的结构定义，详见 docs/book-format.md",
+  "type": "object",
+  "required": ["title", "chapters"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "书名"
+    },
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "格式版本，缺省视为 1"
+    },
+    "created_time": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "创建时间，毫秒时间戳"
+    },
+    "updated_time": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "更新时间，毫秒时间戳"
+    },
+    "chapters": {
+      "type": "array",
+      "description": "顶层章节列表",
+      "items": { "$ref": "#/$defs/chapter" }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "chapter": {
+      "type": "object",
+      "required": ["id", "title"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "description": "章节标识，同时是 chapters/<id>.md 的文件名，同一本书内唯一"
+        },
+        "title": {
+          "type": "string",
+          "description": "章节标题"
+        },
+        "created_time": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "创建时间，毫秒时间戳"
+        },
+        "updated_time": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "更新时间，毫秒时间戳"
+        },
+        "chapters": {
+          "type": "array",
+          "description": "子章节列表；叶子章节为空数组",
+          "items": { "$ref": "#/$defs/chapter" }
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

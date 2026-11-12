@@ -33,6 +33,42 @@ export function importBook(folderPath: string): Promise<BookInfo> {
   return invoke('import_book', { folderPath })
 }
 
+export interface MdScanFile {
+  path: string
+  title: string
+  is_index: boolean
+}
+
+export interface MdScanDir {
+  path: string
+  name: string
+  files: MdScanFile[]
+  children: MdScanDir[]
+  md_count: number
+  image_count: number
+}
+
+export interface MdScan {
+  root_name: string
+  root_path: string
+  md_count: number
+  image_count: number
+  tree: MdScanDir
+}
+
+/** 预览普通 Markdown 目录的章节结构与资源数量 */
+export function scanMarkdownDir(sourcePath: string): Promise<MdScan> {
+  return invoke('scan_markdown_dir', { sourcePath })
+}
+
+/** 把普通 Markdown 目录导入为一本新书 */
+export function importMarkdownDir(
+  sourcePath: string,
+  title?: string,
+): Promise<BookInfo> {
+  return invoke('import_markdown_dir', { sourcePath, title })
+}
+
 export function getBookMeta(bookPath: string): Promise<BookMeta> {
   return invoke('get_book_meta', { bookPath })
 }
@@ -255,4 +291,52 @@ export function startSearch(
   query: string,
 ): Promise<string> {
   return invoke('start_search', { bookPaths, query })
+}
+
+export interface ExportFile {
+  path: string
+  content: string
+}
+
+export interface ExportBinary {
+  path: string
+  data_base64: string
+}
+
+export interface ExportAsset {
+  book_path: string
+  src: string
+  dest: string
+}
+
+export interface ExportSummary {
+  files_written: number
+  assets_copied: number
+  missing_assets: string[]
+}
+
+export function exportSite(
+  outputDir: string,
+  files: ExportFile[],
+  binaries: ExportBinary[],
+  assets: ExportAsset[],
+): Promise<ExportSummary> {
+  return invoke('export_site', { outputDir, files, binaries, assets })
+}
+
+export interface SiteTemplates {
+  chapter: string | null
+  book: string | null
+  home: string | null
+  css: string | null
+}
+
+/** 读取书库根目录 `.gfbook/templates/` 下的自定义导出模板，缺失时为 null */
+export function readSiteTemplates(): Promise<SiteTemplates> {
+  return invoke('read_site_templates')
+}
+
+/** 安装内置示例模板到 `.gfbook/templates/`，返回安装目录 */
+export function installExampleTemplates(): Promise<string> {
+  return invoke('install_example_templates')
 }

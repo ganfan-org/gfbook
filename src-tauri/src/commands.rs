@@ -290,6 +290,7 @@ pub fn new_book(title: String, app_handle: tauri::AppHandle, book_dir: Option<St
     let now = current_timestamp();
     let meta = BookMeta {
         title: title.clone(),
+        schema_version: 1,
         created_time: now,
         updated_time: now,
         chapters: vec![],
@@ -376,6 +377,642 @@ pub fn import_book(folder_path: String, app_handle: tauri::AppHandle) -> Result<
 #[tauri::command]
 pub fn get_book_meta(book_path: String) -> Result<BookMeta, String> {
     load_meta(&book_path)
+}
+
+// ═══════════════════════════════════════════
+// Markdown 目录导入
+// ═══════════════════════════════════════════
+const MARKDOWN_EXTS: &[&str] = &["md", "markdown"];
+const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif", "tif", "tiff"];
+
+#[derive(serde::Serialize)]
+pub struct MdScanFile {
+    pub path: String,
+    pub title: String,
+    pub is_index: bool,
+}
+
+#[derive(serde::Serialize)]
+pub struct MdScanDir {
+    pub path: String,
+    pub name: String,
+    pub files: Vec<MdScanFile>,
+    pub children: Vec<MdScanDir>,
+    /// 含子目录的累计数量
+    pub md_count: usize,
+    pub image_count: usize,
+}
+
+#[derive(serde::Serialize)]
+pub struct MdScan {
+    pub root_name: String,
+    pub root_path: String,
+    pub md_count: usize,
+    pub image_count: usize,
+    pub tree: MdScanDir,
+}
+
+fn is_markdown_file(path: &PathBuf) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| MARKDOWN_EXTS.contains(&e.to_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+fn is_image_file(path: &PathBuf) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| IMAGE_EXTS.contains(&e.to_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+fn is_index_name(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower == "index.md" || lower == "readme.md" || lower == "index.markdown" || lower == "readme.markdown"
+}
+
+fn is_ignored_dir_name(name: &str) -> bool {
+    name.starts_with('.') || name == "node_modules"
+}
+
+fn file_name_of(path: &PathBuf) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
+fn natural_key(name: &str) -> (u64, String) {
+    let digits: String = name.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let num = digits.parse::<u64>().unwrap_or(u64::MAX);
+    (num, name.to_lowercase())
+}
+
+/// 去掉文件名开头的序号（如 `01-`、`2.`、`3_`），得到更干净的标题
+fn tidy_title(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let stripped = trimmed
+        .trim_start_matches(|c: char| c.is_ascii_digit())
+        .trim_start_matches(|c: char| c == '-' || c == '_' || c == '.' || c == '、' || c.is_whitespace());
+    let title = if stripped.is_empty() { trimmed } else { stripped };
+    title.trim().to_string()
+}
+
+/// 取 Markdown 第一个 H1 作为标题，跳过 YAML front matter
+fn extract_md_title(content: &str) -> Option<String> {
+    let mut in_front_matter = false;
+    for (index, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+        if index == 0 && trimmed == "---" {
+            in_front_matter = true;
+            continue;
+        }
+        if in_front_matter {
+            if trimmed == "---" {
+                in_front_matter = false;
+            }
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("# ") {
+            let title = rest.trim().trim_end_matches('#').trim();
+            if !title.is_empty() {
+                return Some(title.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn sorted_md_files(dir: &PathBuf) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_file() && is_markdown_file(p))
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort_by(|a, b| {
+        let an = file_name_of(a);
+        let bn = file_name_of(b);
+        is_index_name(&bn)
+            .cmp(&is_index_name(&an))
+            .then_with(|| natural_key(&an).cmp(&natural_key(&bn)))
+    });
+    files
+}
+
+fn raw_subdirs(dir: &PathBuf) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_dir() && !is_ignored_dir_name(&file_name_of(p)))
+                .collect()
+        })
+        .unwrap_or_default();
+    dirs.sort_by(|a, b| natural_key(&file_name_of(a)).cmp(&natural_key(&file_name_of(b))));
+    dirs
+}
+
+/// 目录（含子目录）里是否有 Markdown；纯图片目录不生成章节
+fn dir_has_markdown(dir: &PathBuf) -> bool {
+    if !sorted_md_files(dir).is_empty() {
+        return true;
+    }
+    raw_subdirs(dir).iter().any(|sub| dir_has_markdown(sub))
+}
+
+fn sorted_subdirs(dir: &PathBuf) -> Vec<PathBuf> {
+    raw_subdirs(dir)
+        .into_iter()
+        .filter(|sub| dir_has_markdown(sub))
+        .collect()
+}
+
+fn join_rel(rel: &str, name: &str) -> String {
+    if rel.is_empty() {
+        name.to_string()
+    } else {
+        format!("{}/{}", rel, name)
+    }
+}
+
+fn scan_dir_recursive(dir: &PathBuf, rel: &str) -> Result<MdScanDir, String> {
+    let name = file_name_of(dir);
+    let mut image_count = fs::read_dir(dir)
+        .map(|entries| entries.flatten().filter(|e| is_image_file(&e.path())).count())
+        .unwrap_or(0);
+    let mut files = Vec::new();
+    for file in sorted_md_files(dir) {
+        let content = fs::read_to_string(&file).unwrap_or_default();
+        let stem = file
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        files.push(MdScanFile {
+            path: join_rel(rel, &file_name_of(&file)),
+            title: extract_md_title(&content).unwrap_or_else(|| tidy_title(&stem)),
+            is_index: is_index_name(&file_name_of(&file)),
+        });
+    }
+
+    let mut children = Vec::new();
+    let mut md_count = files.len();
+    for sub in raw_subdirs(dir) {
+        let sub_name = file_name_of(&sub);
+        let child = scan_dir_recursive(&sub, &join_rel(rel, &sub_name))?;
+        md_count += child.md_count;
+        image_count += child.image_count;
+        // 纯图片目录不出现在目录树里，但图片数仍然计入
+        if child.md_count > 0 {
+            children.push(child);
+        }
+    }
+
+    Ok(MdScanDir {
+        path: rel.to_string(),
+        name,
+        files,
+        children,
+        md_count,
+        image_count,
+    })
+}
+
+/// 预览一个普通 Markdown 目录：统计篇数/图片数并返回目录树
+#[tauri::command]
+pub fn scan_markdown_dir(source_path: String) -> Result<MdScan, String> {
+    let root = PathBuf::from(&source_path);
+    if !root.is_dir() {
+        return Err("目录不存在".to_string());
+    }
+    let tree = scan_dir_recursive(&root, "")?;
+    Ok(MdScan {
+        root_name: file_name_of(&root),
+        root_path: source_path,
+        md_count: tree.md_count,
+        image_count: tree.image_count,
+        tree,
+    })
+}
+
+fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(hex) = std::str::from_utf8(&bytes[i + 1..i + 3]) {
+                if let Ok(value) = u8::from_str_radix(hex, 16) {
+                    out.push(value);
+                    i += 3;
+                    continue;
+                }
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
+fn sanitize_asset_name(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let trimmed = cleaned.trim_matches('-').to_string();
+    if trimmed.is_empty() || trimmed == "." {
+        "image".to_string()
+    } else {
+        trimmed
+    }
+}
+
+struct ImportAssets {
+    root: PathBuf,
+    assets_dir: PathBuf,
+    used: std::collections::HashSet<String>,
+    copied: std::collections::HashMap<String, String>,
+}
+
+impl ImportAssets {
+    fn new(root: &PathBuf, assets_dir: &PathBuf) -> Self {
+        Self {
+            root: root.clone(),
+            assets_dir: assets_dir.clone(),
+            used: std::collections::HashSet::new(),
+            copied: std::collections::HashMap::new(),
+        }
+    }
+
+    fn copy_image(&mut self, path: &PathBuf) -> Option<String> {
+        let canonical = path.canonicalize().ok()?;
+        let key = canonical.to_string_lossy().to_string();
+        if let Some(existing) = self.copied.get(&key) {
+            return Some(existing.clone());
+        }
+        let file_name = sanitize_asset_name(&file_name_of(&canonical));
+        let (stem, ext) = match file_name.rfind('.') {
+            Some(dot) if dot > 0 => (file_name[..dot].to_string(), file_name[dot..].to_string()),
+            _ => (file_name.clone(), String::new()),
+        };
+        let mut name = file_name;
+        let mut n = 2;
+        while !self.used.insert(name.to_lowercase()) {
+            name = format!("{}-{}{}", stem, n, ext);
+            n += 1;
+        }
+        fs::create_dir_all(&self.assets_dir).ok()?;
+        fs::copy(&canonical, self.assets_dir.join(&name)).ok()?;
+        let rel = format!("assets/{}", name);
+        self.copied.insert(key, rel.clone());
+        Some(rel)
+    }
+
+    /// 把 Markdown 中的图片引用复制到 assets/ 并返回新的相对路径
+    fn resolve_href(&mut self, href: &str, base_dir: &PathBuf) -> Option<String> {
+        let href = href.trim();
+        if href.is_empty() {
+            return None;
+        }
+        let lower = href.to_lowercase();
+        if lower.starts_with("http:")
+            || lower.starts_with("https:")
+            || lower.starts_with("data:")
+            || lower.starts_with("mailto:")
+            || lower.starts_with("//")
+            || lower.starts_with('#')
+        {
+            return None;
+        }
+        let clean = href.split('#').next().unwrap_or("").split('?').next().unwrap_or("");
+        if clean.is_empty() {
+            return None;
+        }
+        let decoded = percent_decode(clean);
+        let relative = decoded.trim_start_matches("./");
+        if relative.starts_with('/') || relative.starts_with('\\') {
+            return None;
+        }
+        let candidates = [base_dir.join(relative), self.root.join(relative)];
+        for candidate in candidates.iter() {
+            if candidate.is_file() && is_image_file(candidate) {
+                return self.copy_image(candidate);
+            }
+        }
+        None
+    }
+}
+
+/// 改写 Markdown 图片语法 `![alt](src)` 中的 src
+fn rewrite_md_img_syntax(
+    tail: &str,
+    base_dir: &PathBuf,
+    assets: &mut ImportAssets,
+) -> Option<(String, usize)> {
+    let close_bracket = tail.find(']')?;
+    if !tail[close_bracket + 1..].starts_with('(') {
+        return None;
+    }
+    let inner_start = close_bracket + 2;
+    let close_paren = inner_start + tail[inner_start..].find(')')?;
+    let inner = &tail[inner_start..close_paren];
+    let leading = inner.len() - inner.trim_start().len();
+    let trimmed = inner.trim_start();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let (href_start, href_end) = if trimmed.starts_with('<') {
+        let end = trimmed.find('>')?;
+        (inner_start + leading + 1, inner_start + leading + end)
+    } else {
+        let end = trimmed
+            .find(|c: char| c.is_whitespace())
+            .unwrap_or(trimmed.len());
+        (inner_start + leading, inner_start + leading + end)
+    };
+    let href = &tail[href_start..href_end];
+    let replaced = assets.resolve_href(href, base_dir)?;
+    let mut piece = String::with_capacity(close_paren + 1);
+    piece.push_str(&tail[..href_start]);
+    piece.push_str(&replaced);
+    piece.push_str(&tail[href_end..=close_paren]);
+    Some((piece, close_paren + 1))
+}
+
+/// 改写 HTML `<img src="...">` 中的 src
+fn rewrite_html_img_tag(
+    tail: &str,
+    base_dir: &PathBuf,
+    assets: &mut ImportAssets,
+) -> Option<(String, usize)> {
+    let gt = tail.find('>')?;
+    let tag = &tail[..gt];
+    let src_pos = tag.to_lowercase().find("src=")?;
+    let after = &tag[src_pos + 4..];
+    let first = after.chars().next()?;
+    let (value_start, value_end) = if first == '"' || first == '\'' {
+        let rest = &after[first.len_utf8()..];
+        let end = rest.find(first)?;
+        (src_pos + 4 + first.len_utf8(), src_pos + 4 + first.len_utf8() + end)
+    } else {
+        let end = after
+            .find(|c: char| c.is_whitespace() || c == '>' || c == '/')
+            .unwrap_or(after.len());
+        (src_pos + 4, src_pos + 4 + end)
+    };
+    let href = &tag[value_start..value_end];
+    let replaced = assets.resolve_href(href, base_dir)?;
+    let mut piece = String::with_capacity(gt + 1);
+    piece.push_str(&tail[..value_start]);
+    piece.push_str(&replaced);
+    piece.push_str(&tail[value_end..=gt]);
+    Some((piece, gt + 1))
+}
+
+fn rewrite_md_images(content: &str, base_dir: &PathBuf, assets: &mut ImportAssets) -> String {
+    let mut out = String::with_capacity(content.len());
+    let mut rest = content;
+    loop {
+        let next = match (rest.find("!["), rest.find("<img")) {
+            (None, None) => {
+                out.push_str(rest);
+                break;
+            }
+            (Some(a), None) => (a, false),
+            (None, Some(b)) => (b, true),
+            (Some(a), Some(b)) => {
+                if a <= b {
+                    (a, false)
+                } else {
+                    (b, true)
+                }
+            }
+        };
+        let (pos, is_html) = next;
+        out.push_str(&rest[..pos]);
+        let tail = &rest[pos..];
+        let rewritten = if is_html {
+            rewrite_html_img_tag(tail, base_dir, assets)
+        } else {
+            rewrite_md_img_syntax(tail, base_dir, assets)
+        };
+        match rewritten {
+            Some((piece, consumed)) => {
+                out.push_str(&piece);
+                rest = &tail[consumed..];
+            }
+            None => {
+                let ch = tail.chars().next().unwrap_or('\u{fffd}');
+                out.push(ch);
+                rest = &tail[ch.len_utf8()..];
+            }
+        }
+    }
+    out
+}
+
+fn write_imported_chapter(book_path: &PathBuf, id: &str, content: &str) -> Result<(), String> {
+    let dir = book_path.join(CHAPTERS_DIR);
+    fs::create_dir_all(&dir).map_err(|e| format!("Failed to create chapters dir: {}", e))?;
+    fs::write(dir.join(format!("{}.md", id)), content)
+        .map_err(|e| format!("Failed to write chapter: {}", e))
+}
+
+fn make_chapter_from_file(
+    book_path: &PathBuf,
+    file: &PathBuf,
+    base_dir: &PathBuf,
+    now: u64,
+    assets: &mut ImportAssets,
+) -> Result<Chapter, String> {
+    let raw = fs::read_to_string(file)
+        .map_err(|e| format!("Failed to read {}: {}", file.display(), e))?;
+    let stem = file
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let title = extract_md_title(&raw).unwrap_or_else(|| tidy_title(&stem));
+    let mut content = rewrite_md_images(&raw, base_dir, assets);
+    if !content.ends_with('\n') {
+        content.push('\n');
+    }
+    let id = Uuid::new_v4().to_string();
+    write_imported_chapter(book_path, &id, &content)?;
+    Ok(Chapter {
+        id,
+        title,
+        created_time: now,
+        updated_time: now,
+        chapters: vec![],
+    })
+}
+
+fn import_markdown_tree(
+    book_path: &PathBuf,
+    src_dir: &PathBuf,
+    is_root: bool,
+    now: u64,
+    assets: &mut ImportAssets,
+) -> Result<Vec<Chapter>, String> {
+    let md_files = sorted_md_files(src_dir);
+    let mut chapters = Vec::new();
+
+    if is_root {
+        for file in &md_files {
+            chapters.push(make_chapter_from_file(book_path, file, src_dir, now, assets)?);
+        }
+    } else {
+        let dir_title = tidy_title(&file_name_of(src_dir));
+        let index_file = md_files.iter().find(|f| is_index_name(&file_name_of(f))).cloned();
+
+        let (title, mut content) = match &index_file {
+            Some(file) => {
+                let raw = fs::read_to_string(file).unwrap_or_default();
+                let title = extract_md_title(&raw).unwrap_or_else(|| dir_title.clone());
+                (title, rewrite_md_images(&raw, src_dir, assets))
+            }
+            None => (dir_title.clone(), format!("# {}\n", dir_title)),
+        };
+        if !content.ends_with('\n') {
+            content.push('\n');
+        }
+        let id = Uuid::new_v4().to_string();
+        write_imported_chapter(book_path, &id, &content)?;
+        let mut group = Chapter {
+            id,
+            title,
+            created_time: now,
+            updated_time: now,
+            chapters: vec![],
+        };
+
+        for file in &md_files {
+            if Some(file) == index_file.as_ref() {
+                continue;
+            }
+            group
+                .chapters
+                .push(make_chapter_from_file(book_path, file, src_dir, now, assets)?);
+        }
+        for sub in sorted_subdirs(src_dir) {
+            group
+                .chapters
+                .extend(import_markdown_tree(book_path, &sub, false, now, assets)?);
+        }
+        chapters.push(group);
+    }
+
+    if is_root {
+        for sub in sorted_subdirs(src_dir) {
+            chapters.extend(import_markdown_tree(book_path, &sub, false, now, assets)?);
+        }
+    }
+
+    Ok(chapters)
+}
+
+/// 把普通 Markdown 目录导入为新书：每个 .md 成为一个章节，子目录成为分组章节，图片复制到 assets/
+#[tauri::command]
+pub fn import_markdown_dir(
+    source_path: String,
+    title: Option<String>,
+    app_handle: tauri::AppHandle,
+) -> Result<BookInfo, String> {
+    let src = PathBuf::from(&source_path);
+    if !src.is_dir() {
+        return Err("目录不存在".to_string());
+    }
+    if src.join(META_FILE).exists() {
+        return Err("该目录已经是一本书（含 gfbook.yaml），请使用「导入书」".to_string());
+    }
+
+    let scan = scan_dir_recursive(&src, "")?;
+    if scan.md_count == 0 {
+        return Err("目录中没有找到 Markdown 文件".to_string());
+    }
+
+    let book_title = title
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| {
+            let name = file_name_of(&src);
+            if name.is_empty() {
+                "Imported Book".to_string()
+            } else {
+                name
+            }
+        });
+
+    let mut slug = slugify(&book_title);
+    if slug.is_empty() {
+        slug = format!("book-{}", current_timestamp());
+    }
+    let book_path = default_books_dir().join(&slug);
+    if book_path.exists() {
+        return Err(format!("书库中已存在同名目录：{}", slug));
+    }
+
+    fs::create_dir_all(book_path.join(CHAPTERS_DIR))
+        .map_err(|e| format!("Failed to create chapters dir: {}", e))?;
+    fs::create_dir_all(book_path.join("assets"))
+        .map_err(|e| format!("Failed to create assets dir: {}", e))?;
+
+    let now = current_timestamp();
+    let mut assets = ImportAssets::new(&src, &book_path.join("assets"));
+
+    // 导入中途失败时清理半成品目录，便于用户修正后重试
+    let mut build_book = || -> Result<(), String> {
+        let chapters = import_markdown_tree(&book_path, &src, true, now, &mut assets)?;
+        let meta = BookMeta {
+            title: book_title.clone(),
+            schema_version: 1,
+            created_time: now,
+            updated_time: now,
+            chapters,
+        };
+        let meta_content =
+            serde_yaml::to_string(&meta).map_err(|e| format!("Failed to serialize meta: {}", e))?;
+        fs::write(book_path.join(META_FILE), &meta_content)
+            .map_err(|e| format!("Failed to write meta file: {}", e))?;
+        Ok(())
+    };
+    if let Err(error) = build_book() {
+        fs::remove_dir_all(&book_path).ok();
+        return Err(error);
+    }
+
+    if let Err(e) = git::git_init(&book_path.to_string_lossy()) {
+        eprintln!("Warning: git init failed: {}", e);
+    }
+
+    let path_str = book_path.to_string_lossy().to_string();
+    add_to_book_list(&app_handle, &path_str)?;
+    crate::logger::log_book_event(
+        &app_handle,
+        "import_markdown",
+        &format!(
+            "imported {} markdown files from {}",
+            scan.md_count, source_path
+        ),
+        &path_str,
+    );
+
+    Ok(BookInfo {
+        title: book_title,
+        path: path_str,
+        created_time: now,
+        updated_time: now,
+    })
 }
 
 #[tauri::command]
@@ -1079,3 +1716,176 @@ pub fn start_search(
     });
     Ok("started".to_string())
 }
+
+// ═══════════════════════════════════════════
+// 导出静态站点
+// ═══════════════════════════════════════════
+#[derive(serde::Deserialize)]
+pub struct ExportFile {
+    pub path: String,
+    pub content: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct ExportBinary {
+    pub path: String,
+    pub data_base64: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct ExportAsset {
+    pub book_path: String,
+    pub src: String,
+    pub dest: String,
+}
+
+#[derive(serde::Serialize)]
+pub struct ExportSummary {
+    pub files_written: usize,
+    pub assets_copied: usize,
+    pub missing_assets: Vec<String>,
+}
+
+/// 拒绝绝对路径与 `..`，确保写入不会逃出输出目录
+fn safe_relative_path(raw: &str) -> Result<PathBuf, String> {
+    let path = PathBuf::from(raw);
+    if path.is_absolute() {
+        return Err(format!("Invalid export path: {}", raw));
+    }
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(_) => {}
+            _ => return Err(format!("Invalid export path: {}", raw)),
+        }
+    }
+    Ok(path)
+}
+
+fn write_export_file(root: &PathBuf, rel: &str, bytes: &[u8]) -> Result<(), String> {
+    let dest = root.join(safe_relative_path(rel)?);
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create {}: {}", parent.display(), e))?;
+    }
+    fs::write(&dest, bytes).map_err(|e| format!("Failed to write {}: {}", dest.display(), e))
+}
+
+fn resolve_asset_source(book_path: &PathBuf, src: &str) -> Option<PathBuf> {
+    let normalized = src.trim_start_matches("@/").trim_start_matches('/');
+    let rel = PathBuf::from(normalized);
+    let base = rel.file_name()?.to_string_lossy().to_string();
+    let candidates = [
+        book_path.join(&rel),
+        book_path.join("assets").join(&base),
+        book_path.join("chapters").join(&base),
+        book_path.join("chapters").join(&rel),
+    ];
+    candidates.into_iter().find(|p| p.is_file())
+}
+
+#[tauri::command]
+pub fn export_site(
+    output_dir: String,
+    files: Vec<ExportFile>,
+    binaries: Vec<ExportBinary>,
+    assets: Vec<ExportAsset>,
+) -> Result<ExportSummary, String> {
+    let root = PathBuf::from(&output_dir);
+    fs::create_dir_all(&root)
+        .map_err(|e| format!("Failed to create output dir: {}", e))?;
+
+    let mut files_written = 0;
+    for file in &files {
+        write_export_file(&root, &file.path, file.content.as_bytes())?;
+        files_written += 1;
+    }
+
+    for binary in &binaries {
+        let bytes = base64_decode(&binary.data_base64)?;
+        write_export_file(&root, &binary.path, &bytes)?;
+        files_written += 1;
+    }
+
+    let mut assets_copied = 0;
+    let mut missing_assets: Vec<String> = Vec::new();
+    for asset in &assets {
+        let book_path = PathBuf::from(&asset.book_path);
+        match resolve_asset_source(&book_path, &asset.src) {
+            Some(source) => {
+                let dest = root.join(safe_relative_path(&asset.dest)?);
+                if let Some(parent) = dest.parent() {
+                    fs::create_dir_all(parent)
+                        .map_err(|e| format!("Failed to create {}: {}", parent.display(), e))?;
+                }
+                fs::copy(&source, &dest).map_err(|e| {
+                    format!("Failed to copy {}: {}", source.display(), e)
+                })?;
+                assets_copied += 1;
+            }
+            None => missing_assets.push(asset.src.clone()),
+        }
+    }
+
+    Ok(ExportSummary {
+        files_written,
+        assets_copied,
+        missing_assets,
+    })
+}
+
+// ═══════════════════════════════════════════
+// 导出模板（书库内 .gfbook/templates/ 可覆盖）
+// ═══════════════════════════════════════════
+#[derive(serde::Serialize, Default)]
+pub struct SiteTemplates {
+    pub chapter: Option<String>,
+    pub book: Option<String>,
+    pub home: Option<String>,
+    pub css: Option<String>,
+}
+
+fn read_template(dir: &PathBuf, name: &str) -> Option<String> {
+    fs::read_to_string(dir.join(name)).ok()
+}
+
+/// 读取书库根目录下 `.gfbook/templates/` 的自定义导出模板；缺失的文件返回 None，由前端回退到内置模板
+#[tauri::command]
+pub fn read_site_templates() -> SiteTemplates {
+    let dir = default_books_dir().join(".gfbook").join("templates");
+    SiteTemplates {
+        chapter: read_template(&dir, "chapter.html"),
+        book: read_template(&dir, "book.html"),
+        home: read_template(&dir, "home.html"),
+        css: read_template(&dir, "style.css"),
+    }
+}
+
+const EXAMPLE_TEMPLATES: &[(&str, &str)] = &[
+    ("chapter.html", include_str!("../templates/example/chapter.html")),
+    ("book.html", include_str!("../templates/example/book.html")),
+    ("home.html", include_str!("../templates/example/home.html")),
+    ("style.css", include_str!("../templates/example/style.css")),
+];
+
+/// 安装内置示例模板到 `<书库>/.gfbook/templates/`；已有同名文件时拒绝覆盖
+#[tauri::command]
+pub fn install_example_templates() -> Result<String, String> {
+    let dir = default_books_dir().join(".gfbook").join("templates");
+    let existing: Vec<&str> = EXAMPLE_TEMPLATES
+        .iter()
+        .map(|(name, _)| *name)
+        .filter(|name| dir.join(name).exists())
+        .collect();
+    if !existing.is_empty() {
+        return Err(format!(
+            "已存在模板文件：{}，请先备份或移走后再安装",
+            existing.join("、")
+        ));
+    }
+    fs::create_dir_all(&dir).map_err(|e| format!("Failed to create template dir: {}", e))?;
+    for (name, content) in EXAMPLE_TEMPLATES {
+        fs::write(dir.join(name), content)
+            .map_err(|e| format!("Failed to write {}: {}", name, e))?;
+    }
+    Ok(dir.to_string_lossy().to_string())
+}
+
