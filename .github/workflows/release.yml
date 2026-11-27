@@ -39,7 +39,8 @@ concurrency:
 jobs:
   release:
     name: macOS arm64 release
-    runs-on: macos-14
+    # macos-14 已于 2026-11-02 退役，改用当前可用的 arm64 镜像。
+    runs-on: macos-15
     timeout-minutes: 60
 
     steps:
