@@ -1,0 +1,150 @@
+name: Release
+
+# 触发条件：推送 v* 标签，例如 v0.2.0。
+# 标签必须与 src-tauri/tauri.conf.json 的 version 一致，否则 workflow 会在构建前失败。
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# 仓库 Secrets（Settings → Secrets and variables → Actions）：
+#
+# APPLE_CERTIFICATE
+#   Developer ID Application 证书及其私钥导出的 .p12，整份文件做 base64。
+# APPLE_CERTIFICATE_PASSWORD
+#   导出 .p12 时设置的密码。
+# APPLE_SIGNING_IDENTITY
+#   完整的签名身份，例如：
+#   Developer ID Application: Bangshun Huang (3D6FY977ZR)
+# APPLE_API_KEY
+#   App Store Connect API Key 的 Key ID，不是私钥内容。
+# APPLE_API_ISSUER
+#   App Store Connect API Key 的 Issuer ID（UUID）。
+# APPLE_API_KEY_P8
+#   AuthKey_<KEYID>.p8 文件的完整内容做 base64，用于公证。
+# TAURI_SIGNING_PRIVATE_KEY
+#   updater 私钥文件 ~/.ganfan/gfbook-updater.key 的完整内容（多行原文）。
+# TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+#   上面 updater 私钥的密码。
+#
+# GITHUB_TOKEN 由 GitHub Actions 自动提供，不需要手动配置。
+
+jobs:
+  release:
+    name: macOS arm64 release
+    runs-on: macos-14
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Verify tag matches app version
+        run: |
+          APP_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          echo "tag=${TAG_VERSION} app=${APP_VERSION}"
+          test "$APP_VERSION" = "$TAG_VERSION"
+
+      # 项目通过 rust-toolchain.toml 固定了 1.91.0，这里显式安装同一版本。
+      # 当前只发布 Apple Silicon（aarch64），与已有 0.1.0 产物一致。
+      # 如果以后需要同时支持 Intel，改为 universal-apple-darwin，并同时安装
+      # x86_64-apple-darwin 与 aarch64-apple-darwin 两个 target。
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          targets: aarch64-apple-darwin
+          components: rustfmt, clippy
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Import Developer ID certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Prepare notarization API key
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/private_keys"
+          echo "$APPLE_API_KEY_P8" | base64 --decode \
+            > "$RUNNER_TEMP/private_keys/AuthKey_${APPLE_API_KEY}.p8"
+          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/private_keys/AuthKey_${APPLE_API_KEY}.p8" >> "$GITHUB_ENV"
+
+      - name: Prepare updater signing key
+        env:
+          UPDATER_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          printf '%s' "$UPDATER_PRIVATE_KEY" > "$RUNNER_TEMP/updater.key"
+          chmod 600 "$RUNNER_TEMP/updater.key"
+          echo "TAURI_SIGNING_PRIVATE_KEY=$RUNNER_TEMP/updater.key" >> "$GITHUB_ENV"
+
+      # tauri-action 负责：
+      # - 调用 npm run tauri build -- --target aarch64-apple-darwin
+      # - 生成并上传 .dmg、.app.tar.gz、.app.tar.gz.sig
+      # - 生成 latest.json（updater 使用 GitHub Releases 作为 CDN）
+      # - 创建/更新对应 tag 的 GitHub Release
+      - name: Build, sign, notarize and upload release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Ganfan Book ${{ github.ref_name }}'
+          releaseBody: |
+            macOS Apple Silicon (arm64) 版本。
+
+            - 签名并公证的 DMG 安装包
+            - updater 产物：.app.tar.gz 与 .sig
+            - updater 清单：latest.json
+          releaseDraft: false
+          prerelease: false
+          uploadUpdaterJson: true
+          tauriScript: npm run tauri
+          args: --target aarch64-apple-darwin
+
+      - name: Cleanup signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/certificate.p12"
+          rm -f "$RUNNER_TEMP/private_keys/AuthKey_"*.p8
+          rm -f "$RUNNER_TEMP/updater.key"

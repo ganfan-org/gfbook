@@ -1,0 +1,5 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Ganfan Book Dev",
+  "identifier": "org.ganfan.app.gfbook.dev"
+}

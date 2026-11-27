@@ -10,7 +10,7 @@ import i18next from 'i18next'
 import katex from 'katex'
 
 import { CustomTable } from '../editor/customTable'
-import type { BookInfo, BookMeta, Chapter } from '../types'
+import type { BookInfo, BookKind, BookMeta, Chapter } from '../types'
 import {
   exportSite as exportSiteCommand,
   getBookMeta,
@@ -42,15 +42,36 @@ export interface ExportResult {
 interface RenderedChapter {
   id: string
   title: string
+  /** 展示用标题：日记条目优先用 title，缺省回退到日期标签 */
+  displayTitle: string
   depth: number
   file: string
   html: string
+  /** 日记条目日期 YYYY-MM-DD */
+  date?: string
+  /** 创建时间（毫秒）；同日条目按它排序 */
+  createdTime: number
+  /** 同一天内的序号（从 0 开始）与当天总条数，用于区分同一天多条 */
+  dayIndex?: number
+  dayTotal?: number
+  /** 纯文本摘要，用于时间线 */
+  excerpt: string
 }
 
 interface RenderedBook {
   info: BookInfo
+  kind: BookKind
   slug: string
   chapters: RenderedChapter[]
+}
+
+interface DiaryEntry {
+  href: string
+  date: string
+  title: string
+  createdTime: number
+  excerpt: string
+  bookTitle: string
 }
 
 function createExtensions() {
@@ -109,16 +130,60 @@ function uniqueSlug(title: string, used: Set<string>, index: number): string {
   return slug
 }
 
-function flattenChapters(chapters: Chapter[], depth = 0): {
+/**
+ * 日期统一成 `YYYY-MM-DD`。
+ * CLI 里用 js-yaml 读元数据时，未加引号的日期会被解析为 Date（UTC 零点）。
+ */
+function normalizeDateKey(value: unknown): string | undefined {
+  if (!value) return undefined
+  if (value instanceof Date) {
+    const y = value.getUTCFullYear()
+    const m = String(value.getUTCMonth() + 1).padStart(2, '0')
+    const d = String(value.getUTCDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }
+  return String(value)
+}
+
+/**
+ * 标量统一成字符串。
+ * CLI 里用 js-yaml 读元数据时，未加引号的 `2026-11-13` 会被解析为 Date，
+ * 直接当章节 id / 标题使用会导致路径与文本出错。
+ */
+function normalizeScalar(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  if (value instanceof Date) return normalizeDateKey(value) ?? ''
+  return String(value)
+}
+
+function flattenChapters(chapters: Chapter[], depth = 0, diary = false): {
   id: string
   title: string
   depth: number
+  createdTime: number
+  date?: string
 }[] {
-  const result: { id: string; title: string; depth: number }[] = []
+  const result: {
+    id: string
+    title: string
+    depth: number
+    createdTime: number
+    date?: string
+  }[] = []
   for (const chapter of chapters) {
-    result.push({ id: chapter.id, title: chapter.title, depth })
+    const id = normalizeScalar(chapter.id)
+    result.push({
+      id,
+      title: normalizeScalar(chapter.title),
+      depth,
+      createdTime: chapter.created_time ?? 0,
+      // 兼容旧日记：没有 date 时，若 id 本身是合法日期则直接采用
+      date:
+        normalizeDateKey(chapter.date) ??
+        (diary && parseDateKey(id) ? id : undefined),
+    })
     if (chapter.chapters?.length) {
-      result.push(...flattenChapters(chapter.chapters, depth + 1))
+      result.push(...flattenChapters(chapter.chapters, depth + 1, diary))
     }
   }
   return result
@@ -135,6 +200,128 @@ function formatDate(ts: number): string {
     i18next.language === 'zh' ? 'zh-CN' : 'en-US',
     { year: 'numeric', month: 'short', day: 'numeric' },
   )
+}
+
+// ═══════════════════════════════════════════
+// 日记日期格式
+// ═══════════════════════════════════════════
+function parseDateKey(key: string): Date | null {
+  const parts = key.split('-')
+  if (parts.length !== 3) return null
+  const [y, m, d] = parts.map(Number)
+  if (!y || !m || !d) return null
+  return new Date(y, m - 1, d)
+}
+
+/** 条目页标题：`2026年11月13日 星期五` / `November 13, 2026 Friday` */
+function diaryDateParts(
+  date: string,
+): { label: string; weekday: string } | null {
+  const d = parseDateKey(date)
+  if (!d) return null
+  if (i18next.language === 'zh') {
+    return {
+      label: `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`,
+      weekday: d.toLocaleDateString('zh-CN', { weekday: 'long' }),
+    }
+  }
+  return {
+    label: d.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    }),
+    weekday: d.toLocaleDateString('en-US', { weekday: 'long' }),
+  }
+}
+
+function formatDiaryHeading(date: string): string {
+  const parts = diaryDateParts(date)
+  if (!parts) return escapeHtml(date)
+  return `${parts.label}<span class="entry-weekday">${parts.weekday}</span>`
+}
+
+function formatDiaryTitle(date: string): string {
+  const parts = diaryDateParts(date)
+  return parts ? `${parts.label} ${parts.weekday}` : date
+}
+
+/** 短日期标签（未转义）：`11月13日 · 周四` / `Nov 13, Thu` */
+function formatDiaryShortDate(date: string): string {
+  const d = parseDateKey(date)
+  if (!d) return date
+  if (i18next.language === 'zh') {
+    const weekday = d.toLocaleDateString('zh-CN', { weekday: 'short' })
+    return `${d.getMonth() + 1}月${d.getDate()}日 · ${weekday}`
+  }
+  return d.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    weekday: 'short',
+  })
+}
+
+/** 同一天多条时用来区分条目的序号文案：`第 2 篇` / `Entry 2` */
+function entryIndexLabel(index: number): string {
+  return i18next.t('export.entryIndex', { n: index + 1 })
+}
+
+/** 条目展示名（未转义）：自定义标题优先；缺省时同一天多条带序号，单条用短日期 */
+function entryDisplayTitle(
+  date: string,
+  title: string,
+  dayIndex = 0,
+  dayTotal = 1,
+): string {
+  if (title && title !== date) return title
+  const short = formatDiaryShortDate(date)
+  if (dayTotal > 1) return `${short} · ${entryIndexLabel(dayIndex)}`
+  return short
+}
+
+/** 时间线日期分块内的行标题：日期已在块头显示，多条时用序号区分 */
+function entryRowTitle(
+  date: string,
+  title: string,
+  dayIndex: number,
+  dayTotal: number,
+): string {
+  if (title && title !== date) return escapeHtml(title)
+  if (dayTotal > 1) return escapeHtml(entryIndexLabel(dayIndex))
+  return escapeHtml(formatDiaryShortDate(date))
+}
+
+/** 月份分组标题：`2026年11月` / `November 2026` */
+function formatDiaryMonth(month: string): string {
+  const d = parseDateKey(`${month}-01`)
+  if (!d) return month
+  if (i18next.language === 'zh') {
+    return `${d.getFullYear()}年${d.getMonth() + 1}月`
+  }
+  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long' })
+}
+
+/** 提取纯文本摘要，用于时间线 */
+function htmlToExcerpt(html: string, limit = 120): string {
+  const container = document.createElement('div')
+  container.innerHTML = html
+  container.querySelector('h1')?.remove()
+  // 块级元素之间补空格，避免段落首尾直接粘连
+  container.innerHTML = container.innerHTML.replace(
+    /<\/(p|li|h[1-6]|blockquote|div|tr|td|pre)>/gi,
+    ' </$1>',
+  )
+  const text = (container.textContent ?? '').replace(/\s+/g, ' ').trim()
+  return text.length > limit ? `${text.slice(0, limit)}…` : text
+}
+
+/** 日记正文常以 `# 日期` 开头，替换为格式化的日期标题，避免重复 */
+function stripLeadingTitle(html: string, title: string, date: string): string {
+  const match = html.match(/^\s*<h1[^>]*>([\s\S]*?)<\/h1>\s*/)
+  if (!match) return html
+  const text = match[1].replace(/<[^>]+>/g, '').trim()
+  if (text === title || text === date) return html.slice(match[0].length)
+  return html
 }
 
 function toBase64(bytes: Uint8Array): string {
@@ -154,7 +341,10 @@ interface AssetCollector {
   assets: ExportAsset[]
 }
 
-function createAssetCollector(bookPath: string, slug: string): AssetCollector {
+function createAssetCollector(
+  bookPath: string,
+  destPrefix: string,
+): AssetCollector {
   const bySrc = new Map<string, string>()
   const usedNames = new Set<string>()
   const assets: ExportAsset[] = []
@@ -187,7 +377,11 @@ function createAssetCollector(bookPath: string, slug: string): AssetCollector {
 
     const rel = `assets/${name}`
     bySrc.set(src, rel)
-    assets.push({ book_path: bookPath, src: decoded, dest: `${slug}/${rel}` })
+    assets.push({
+      book_path: bookPath,
+      src: decoded,
+      dest: `${destPrefix}${rel}`,
+    })
     return rel
   }
 
@@ -283,12 +477,15 @@ function buildSidebar(
       const active = currentFile && ch.file === currentFile ? ' active' : ''
       return `<a class="depth-${Math.min(ch.depth, 3)}${active}"${
         active ? ' aria-current="page"' : ''
-      } href="${ch.file}">${escapeHtml(ch.title)}</a>`
+      } href="${ch.file}">${escapeHtml(ch.displayTitle)}</a>`
     })
     .join('\n')
-  return `<a class="book-link" href="index.html">${escapeHtml(
-    bookTitle,
-  )}</a>\n<nav class="toc">\n${items}\n</nav>`
+  const bookLink = bookTitle
+    ? `<a class="book-link" href="index.html">${escapeHtml(
+        bookTitle,
+      )}</a>\n`
+    : ''
+  return `${bookLink}<nav class="toc">\n${items}\n</nav>`
 }
 
 function buildPager(
@@ -299,14 +496,107 @@ function buildPager(
   const left = prev
     ? `<a class="pager-prev" href="${prev.file}"><span>${escapeHtml(
         i18next.t('export.prev'),
-      )}</span>${escapeHtml(prev.title)}</a>`
+      )}</span>${escapeHtml(prev.displayTitle)}</a>`
     : '<span></span>'
   const right = next
     ? `<a class="pager-next" href="${next.file}"><span>${escapeHtml(
         i18next.t('export.next'),
-      )}</span>${escapeHtml(next.title)}</a>`
+      )}</span>${escapeHtml(next.displayTitle)}</a>`
     : '<span></span>'
   return `<nav class="pager">${left}${right}</nav>`
+}
+
+function buildTimeline(
+  entries: DiaryEntry[],
+  options: { groupByMonth?: boolean } = {},
+): string {
+  if (!entries.length) return ''
+  const sorted = [...entries].sort((a, b) => {
+    const byDate = b.date.localeCompare(a.date)
+    if (byDate !== 0) return byDate
+    return a.createdTime - b.createdTime
+  })
+
+  // 按日期分块，同一天的多条放在同一个块里
+  const days: { date: string; entries: DiaryEntry[] }[] = []
+  for (const entry of sorted) {
+    const last = days[days.length - 1]
+    if (!last || last.date !== entry.date) {
+      days.push({ date: entry.date, entries: [entry] })
+    } else {
+      last.entries.push(entry)
+    }
+  }
+
+  const items: string[] = []
+  let currentMonth = ''
+  for (const day of days) {
+    if (options.groupByMonth) {
+      const month = day.date.slice(0, 7)
+      if (month && month !== currentMonth) {
+        currentMonth = month
+        items.push(
+          `<li class="timeline-month">${escapeHtml(
+            formatDiaryMonth(month),
+          )}</li>`,
+        )
+      }
+    }
+
+    if (day.entries.length === 1) {
+      const entry = day.entries[0]
+      const customTitle = !!entry.title && entry.title !== entry.date
+      items.push(
+        `<li class="timeline-item"><a class="timeline-link" href="${escapeHtml(
+          entry.href,
+        )}"><span class="timeline-title">${entryRowTitle(
+          entry.date,
+          entry.title,
+          0,
+          1,
+        )}</span>${
+          customTitle
+            ? `<span class="timeline-date-inline">${escapeHtml(
+                formatDiaryTitle(entry.date),
+              )}</span>`
+            : ''
+        }${
+          entry.excerpt
+            ? `<span class="timeline-excerpt">${escapeHtml(
+                entry.excerpt,
+              )}</span>`
+            : ''
+        }</a></li>`,
+      )
+      continue
+    }
+
+    const rows = day.entries
+      .map(
+        (entry, index) =>
+          `<li class="timeline-item"><a class="timeline-link" href="${escapeHtml(
+            entry.href,
+          )}"><span class="timeline-title">${entryRowTitle(
+            entry.date,
+            entry.title,
+            index,
+            day.entries.length,
+          )}</span>${
+            entry.excerpt
+              ? `<span class="timeline-excerpt">${escapeHtml(
+                  entry.excerpt,
+                )}</span>`
+              : ''
+          }</a></li>`,
+      )
+      .join('\n')
+    items.push(
+      `<li class="timeline-day"><div class="timeline-day-head">${escapeHtml(
+        formatDiaryTitle(day.date),
+      )}</div>\n<ol class="timeline-day-list">\n${rows}\n</ol></li>`,
+    )
+  }
+  return `<ol class="timeline">\n${items.join('\n')}\n</ol>`
 }
 
 // ═══════════════════════════════════════════
@@ -364,6 +654,8 @@ a:hover { text-decoration: underline; }
 }
 .topbar .brand { font-weight: 600; font-size: 14px; letter-spacing: .01em; }
 .topbar .book { color: var(--muted); font-size: 13px; }
+.topbar a.book:hover { color: var(--fg); text-decoration: none; }
+.topbar .book:empty { display: none; }
 .topbar .book::before { content: "/"; margin-right: 10px; color: var(--line); }
 
 .sidebar { padding: 22px 14px 40px 18px; }
@@ -508,6 +800,71 @@ article .markdown-fallback { white-space: pre-wrap; }
 .chapter-list .index { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; min-width: 1.6em; }
 .empty { color: var(--muted); font-size: 14px; }
 
+.timeline { list-style: none; padding: 0; margin: 0; }
+.timeline-month {
+  padding: 22px 4px 8px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: .04em;
+}
+.timeline-month:first-child { padding-top: 0; }
+.timeline-day { border-bottom: 1px solid var(--line); padding: 14px 0 4px; }
+.timeline-day-head {
+  padding: 0 4px 6px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+.timeline-day-list { list-style: none; padding: 0; margin: 0; }
+.timeline-day .timeline-item { border-bottom: none; }
+.timeline-day .timeline-link { padding: 8px 4px; }
+.timeline-item { border-bottom: 1px solid var(--line); }
+.timeline-link {
+  display: block;
+  padding: 15px 4px;
+  color: var(--fg);
+}
+.timeline-link:hover { color: var(--accent); text-decoration: none; }
+.timeline-title { display: block; font-size: 15px; font-weight: 600; line-height: 1.45; }
+.timeline-date-inline { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.timeline-excerpt {
+  display: -webkit-box;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.55;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.timeline-section { max-width: 720px; margin: 0 auto 2.4em; }
+.timeline-section .section-title {
+  margin: 0 0 .3em;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.entry-weekday { margin-left: .5em; color: var(--muted); font-size: .72em; font-weight: 500; }
+article h1.entry-title { margin-bottom: 1.1em; }
+.entry-date {
+  margin: -0.8em 0 1.8em;
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.entry-index {
+  margin: -0.8em 0 1.8em;
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .home { padding: 72px 24px 96px; }
 .home-inner { max-width: 720px; margin: 0 auto; }
 .home h1 { font-size: 2rem; margin: 0 0 .3em; font-weight: 650; letter-spacing: -.02em; }
@@ -549,6 +906,7 @@ article .markdown-fallback { white-space: pre-wrap; }
   .sidebar .toc { margin-top: 8px; }
   .content { padding: 22px 20px 64px; }
   .content article { font-size: 16.5px; }
+  .timeline-link { padding: 14px 0; }
 }
 @media (min-width: 980px) {
   .layout {
@@ -592,12 +950,13 @@ const DEFAULT_TEMPLATES: SiteTemplateSet = {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{title}}</title>
 <link rel="stylesheet" href="{{css_href}}">
+{{favicon_links}}
 {{katex_link}}
 </head>
 <body>
 <header class="topbar">
 <a class="brand" href="{{home_href}}">{{site_title}}</a>
-<span class="book">{{book_title}}</span>
+<a class="book" href="{{book_href}}">{{book_title}}</a>
 </header>
 <div class="layout">
 <aside class="sidebar">
@@ -620,12 +979,13 @@ const DEFAULT_TEMPLATES: SiteTemplateSet = {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{title}}</title>
 <link rel="stylesheet" href="{{css_href}}">
+{{favicon_links}}
 {{katex_link}}
 </head>
 <body>
 <header class="topbar">
 <a class="brand" href="{{home_href}}">{{site_title}}</a>
-<span class="book">{{book_title}}</span>
+<a class="book" href="{{book_href}}">{{book_title}}</a>
 </header>
 <div class="layout">
 <aside class="sidebar">
@@ -647,11 +1007,13 @@ const DEFAULT_TEMPLATES: SiteTemplateSet = {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{site_title}}</title>
 <link rel="stylesheet" href="style.css">
+{{favicon_links}}
 </head>
 <body class="home">
 <div class="home-inner">
 <h1>{{site_title}}</h1>
 <p class="subtitle">{{subtitle}}</p>
+{{timeline}}
 <ul class="book-list">
 {{book_list}}
 </ul>
@@ -694,12 +1056,24 @@ async function loadSiteTemplates(): Promise<SiteTemplateSet> {
 export async function exportBooksSite(options: {
   books: BookInfo[]
   outputDir: string
+  /** 站点标题，缺省使用「书库」 */
+  siteTitle?: string
+  /** 顶栏站点名的链接目标；缺省按导出目录结构自动使用相对路径 */
+  siteHome?: string
+  /** 站点图标地址；设置后每个页面都会引用该图标 */
+  faviconHref?: string
   onProgress?: (p: ExportProgress) => void
 }): Promise<ExportResult> {
   const { books, outputDir, onProgress } = options
   if (!books.length) throw new Error(i18next.t('export.noBooks'))
 
-  const siteTitle = i18next.t('export.siteTitle')
+  const siteTitle = options.siteTitle?.trim() || i18next.t('export.siteTitle')
+  // 单书导出时铺平到站点根目录；多书时保留每本书的目录层
+  const flatLayout = books.length === 1
+  const faviconHref = options.faviconHref?.trim() || ''
+  const faviconLinks = faviconHref
+    ? `<link rel="icon" href="${escapeHtml(faviconHref)}">`
+    : ''
 
   // 阶段一：读取书目
   const metas: BookMeta[] = []
@@ -719,7 +1093,13 @@ export async function exportBooksSite(options: {
   const allAssets: ExportAsset[] = []
   let pageTotal = 0
   let chapterTotal = 0
-  for (const meta of metas) chapterTotal += flattenChapters(meta.chapters).length
+  for (const meta of metas) {
+    chapterTotal += flattenChapters(
+      meta.chapters,
+      0,
+      meta.kind === 'diary',
+    ).length
+  }
 
   let chapterDone = 0
   let mathUsed = false
@@ -727,9 +1107,20 @@ export async function exportBooksSite(options: {
   for (let i = 0; i < books.length; i++) {
     const book = books[i]
     const meta = metas[i]
+    const kind: BookKind = meta.kind === 'diary' ? 'diary' : 'book'
     const slug = uniqueSlug(book.title, usedSlugs, i)
-    const collector = createAssetCollector(book.path, slug)
-    const flat = flattenChapters(meta.chapters)
+    const collector = createAssetCollector(
+      book.path,
+      flatLayout ? '' : `${slug}/`,
+    )
+    const flat = flattenChapters(meta.chapters, 0, kind === 'diary')
+    if (kind === 'diary') {
+      flat.sort((a, b) => {
+        const byDate = (b.date ?? '').localeCompare(a.date ?? '')
+        if (byDate !== 0) return byDate
+        return a.createdTime - b.createdTime
+      })
+    }
     const chapters: RenderedChapter[] = []
 
     for (const item of flat) {
@@ -750,15 +1141,44 @@ export async function exportBooksSite(options: {
       chapters.push({
         id: item.id,
         title: item.title,
+        displayTitle: item.title,
         depth: item.depth,
         file: chapterFileName(item.id),
         html,
+        date: item.date,
+        createdTime: item.createdTime,
+        excerpt: kind === 'diary' ? htmlToExcerpt(html) : '',
       })
       chapterDone++
     }
 
+    if (kind === 'diary') {
+      // 计算每条日记在其日期内的序号，用于同一天多条时的展示
+      const totals = new Map<string, number>()
+      for (const chapter of chapters) {
+        if (chapter.date) {
+          totals.set(chapter.date, (totals.get(chapter.date) ?? 0) + 1)
+        }
+      }
+      const seen = new Map<string, number>()
+      for (const chapter of chapters) {
+        if (!chapter.date) continue
+        const dayIndex = seen.get(chapter.date) ?? 0
+        seen.set(chapter.date, dayIndex + 1)
+        const dayTotal = totals.get(chapter.date) ?? 1
+        chapter.dayIndex = dayIndex
+        chapter.dayTotal = dayTotal
+        chapter.displayTitle = entryDisplayTitle(
+          chapter.date,
+          chapter.title,
+          dayIndex,
+          dayTotal,
+        )
+      }
+    }
+
     allAssets.push(...collector.assets)
-    rendered.push({ info: book, slug, chapters })
+    rendered.push({ info: book, kind, slug, chapters })
   }
 
   // 阶段三：组装页面
@@ -769,9 +1189,15 @@ export async function exportBooksSite(options: {
   const lang = i18next.language === 'zh' ? 'zh-CN' : 'en'
 
   for (const book of rendered) {
-    const bookTitle = book.info.title
-    const cssHref = '../style.css'
-    const katexHref = mathUsed ? '../katex/katex.min.css' : null
+    const bookTitle = book.info.title.trim()
+    const prefix = flatLayout ? '' : `${book.slug}/`
+    const cssHref = flatLayout ? 'style.css' : '../style.css'
+    const homeHref =
+      options.siteHome?.trim() || (flatLayout ? 'index.html' : '../index.html')
+    const bookHref = 'index.html'
+    const katexHref = mathUsed
+      ? `${flatLayout ? '' : '../'}katex/katex.min.css`
+      : null
     const katexLink = katexHref
       ? `<link rel="stylesheet" href="${katexHref}">`
       : ''
@@ -780,19 +1206,65 @@ export async function exportBooksSite(options: {
       const prev = index > 0 ? book.chapters[index - 1] : null
       const next =
         index < book.chapters.length - 1 ? book.chapters[index + 1] : null
-      const body = chapter.html.trimStart().startsWith('<h1')
-        ? chapter.html
-        : `<h1>${escapeHtml(chapter.title)}</h1>\n${chapter.html}`
+      let body: string
+      if (book.kind === 'diary' && chapter.date) {
+        const customTitle =
+          !!chapter.title && chapter.title !== chapter.date
+        const content = stripLeadingTitle(
+          chapter.html,
+          chapter.title,
+          chapter.date,
+        )
+        body = customTitle
+          ? `<h1 class="entry-title">${escapeHtml(
+              chapter.title,
+            )}</h1>\n<p class="entry-date">${escapeHtml(
+              formatDiaryTitle(chapter.date),
+            )}</p>\n${content}`
+          : `<h1 class="entry-title">${formatDiaryHeading(
+              chapter.date,
+            )}</h1>${
+              (chapter.dayTotal ?? 1) > 1
+                ? `\n<p class="entry-index">${escapeHtml(
+                    entryIndexLabel(chapter.dayIndex ?? 0),
+                  )}</p>`
+                : ''
+            }\n${content}`
+      } else {
+        body = chapter.html.trimStart().startsWith('<h1')
+          ? chapter.html
+          : `${
+              chapter.title
+                ? `<h1>${escapeHtml(chapter.title)}</h1>\n`
+                : ''
+            }${chapter.html}`
+      }
+      const entryTitle =
+        book.kind === 'diary' && chapter.date
+          ? chapter.title && chapter.title !== chapter.date
+            ? chapter.title
+            : formatDiaryTitle(chapter.date)
+          : chapter.title
+      const htmlTitle =
+        book.kind === 'diary'
+          ? Array.from(new Set([bookTitle || siteTitle, siteTitle])).join(
+              ' · ',
+            )
+          : Array.from(
+              new Set([entryTitle, bookTitle || siteTitle].filter(Boolean)),
+            ).join(' · ') || siteTitle
       files.push({
-        path: `${book.slug}/${chapter.file}`,
+        path: `${prefix}${chapter.file}`,
         content: renderTemplate(templates.chapter, {
           lang,
-          title: escapeHtml(`${chapter.title} · ${bookTitle}`),
+          title: escapeHtml(htmlTitle),
           site_title: escapeHtml(siteTitle),
           book_title: escapeHtml(bookTitle),
           css_href: cssHref,
+          favicon_links: faviconLinks,
           katex_link: katexLink,
-          home_href: '../index.html',
+          home_href: homeHref,
+          book_href: bookHref,
           toc_label: escapeHtml(tocLabel),
           sidebar: buildSidebar(bookTitle, book.chapters, chapter.file),
           content: `<article>\n${body}\n</article>`,
@@ -802,24 +1274,40 @@ export async function exportBooksSite(options: {
       pageTotal++
     })
 
-    // 书籍目录页
-    const chapterList = book.chapters.length
-      ? `<ul class="chapter-list">\n${book.chapters
-          .map(
-            (ch, index) =>
-              `<li><a class="depth-${Math.min(ch.depth, 3)}" href="${
-                ch.file
-              }"><span class="index">${index + 1}</span><span>${escapeHtml(
-                ch.title,
-              )}</span></a></li>`,
-          )
-          .join('\n')}\n</ul>`
-      : `<p class="empty">${escapeHtml(i18next.t('export.noChapters'))}</p>`
+    // 书籍目录页（单书铺平时它就是站点入口 index.html）
+    const chapterList =
+      book.kind === 'diary'
+        ? buildTimeline(
+            book.chapters
+              .filter(ch => ch.date)
+              .map(ch => ({
+                href: ch.file,
+                date: ch.date ?? '',
+                title: ch.title,
+                createdTime: ch.createdTime,
+                excerpt: ch.excerpt,
+                bookTitle,
+              })),
+            { groupByMonth: true },
+          ) ||
+          `<p class="empty">${escapeHtml(i18next.t('export.noChapters'))}</p>`
+        : book.chapters.length
+          ? `<ul class="chapter-list">\n${book.chapters
+              .map(
+                (ch, index) =>
+                  `<li><a class="depth-${Math.min(ch.depth, 3)}" href="${
+                    ch.file
+                  }"><span class="index">${index + 1}</span><span>${escapeHtml(
+                    ch.title,
+                  )}</span></a></li>`,
+              )
+              .join('\n')}\n</ul>`
+          : `<p class="empty">${escapeHtml(i18next.t('export.noChapters'))}</p>`
 
-    const intro = `<div class="book-intro"><h1>${escapeHtml(
-      bookTitle,
-    )}</h1><div class="meta">${escapeHtml(
-      i18next.t('export.chapterCount', { n: book.chapters.length }),
+    const introMeta = `${escapeHtml(
+      book.kind === 'diary'
+        ? i18next.t('export.entryCount', { n: book.chapters.length })
+        : i18next.t('export.chapterCount', { n: book.chapters.length }),
     )}${
       book.info.updated_time
         ? ` · ${escapeHtml(
@@ -828,53 +1316,98 @@ export async function exportBooksSite(options: {
             }),
           )}`
         : ''
-    }</div></div>`
+    }`
+    const intro = bookTitle
+      ? `<div class="book-intro"><h1>${escapeHtml(
+          bookTitle,
+        )}</h1><div class="meta">${introMeta}</div></div>\n`
+      : ''
 
     files.push({
-      path: `${book.slug}/index.html`,
+      path: flatLayout ? 'index.html' : `${book.slug}/index.html`,
       content: renderTemplate(templates.book, {
         lang,
-        title: escapeHtml(bookTitle),
+        title: escapeHtml(
+          book.kind === 'diary'
+            ? Array.from(
+                new Set([bookTitle || siteTitle, siteTitle]),
+              ).join(' · ')
+            : bookTitle || siteTitle,
+        ),
         site_title: escapeHtml(siteTitle),
         book_title: escapeHtml(bookTitle),
         css_href: cssHref,
+        favicon_links: faviconLinks,
         katex_link: katexLink,
-        home_href: '../index.html',
+        home_href: homeHref,
+        book_href: bookHref,
         toc_label: escapeHtml(tocLabel),
         sidebar: buildSidebar(bookTitle, book.chapters, null),
-        content: `${intro}\n${chapterList}`,
+        content: `${intro}${chapterList}`,
       }),
     })
     pageTotal++
   }
 
-  // 站点入口
-  const listItems = rendered
-    .map(
-      book =>
-        `<li><a href="${escapeHtml(
-          book.slug,
-        )}/index.html"><span class="title">${escapeHtml(
-          book.info.title,
-        )}</span><span class="info">${escapeHtml(
-          i18next.t('export.chapterCount', { n: book.chapters.length }),
-        )}</span></a></li>`,
-    )
-    .join('\n')
-  files.push({
-    path: 'index.html',
-    content: renderTemplate(templates.home, {
-      lang,
-      site_title: escapeHtml(siteTitle),
-      subtitle: escapeHtml(
-        i18next.t('export.bookCount', { n: rendered.length }),
-      ),
-      book_list: listItems,
-      footer: escapeHtml(
-        i18next.t('export.generatedAt', { date: formatDate(Date.now()) }),
-      ),
-    }),
-  })
+  // 站点入口（多书时是书库首页；单书已铺平到根目录）
+  if (!flatLayout) {
+    const diaryEntries: DiaryEntry[] = rendered
+      .filter(book => book.kind === 'diary')
+      .flatMap(book =>
+        book.chapters
+          .filter(chapter => chapter.date)
+          .map(chapter => ({
+            href: `${book.slug}/${chapter.file}`,
+            date: chapter.date ?? '',
+            title: chapter.title,
+            createdTime: chapter.createdTime,
+            excerpt: chapter.excerpt,
+            bookTitle: book.info.title,
+          })),
+      )
+      .sort((a, b) => {
+        const byDate = b.date.localeCompare(a.date)
+        return byDate !== 0 ? byDate : a.createdTime - b.createdTime
+      })
+      .slice(0, 20)
+    const homeTimeline = diaryEntries.length
+      ? `<section class="timeline-section"><h2 class="section-title">${escapeHtml(
+          i18next.t('export.recentDiaries'),
+        )}</h2>${buildTimeline(diaryEntries)}</section>`
+      : ''
+    const listItems = rendered
+      .map(
+        book =>
+          `<li><a href="${escapeHtml(
+            book.slug,
+          )}/index.html"><span class="title">${escapeHtml(
+            book.info.title || book.slug,
+          )}</span><span class="info">${escapeHtml(
+            book.kind === 'diary'
+              ? i18next.t('export.entryCount', { n: book.chapters.length })
+              : i18next.t('export.chapterCount', { n: book.chapters.length }),
+          )}</span></a></li>`,
+      )
+      .join('\n')
+    files.push({
+      path: 'index.html',
+      content: renderTemplate(templates.home, {
+        lang,
+        site_title: escapeHtml(siteTitle),
+        favicon_links: faviconLinks,
+        subtitle: escapeHtml(
+          diaryEntries.length
+            ? i18next.t('export.diaryCount', { n: diaryEntries.length })
+            : i18next.t('export.bookCount', { n: rendered.length }),
+        ),
+        timeline: homeTimeline,
+        book_list: listItems,
+        footer: escapeHtml(
+          i18next.t('export.generatedAt', { date: formatDate(Date.now()) }),
+        ),
+      }),
+    })
+  }
   files.push({ path: 'style.css', content: templates.css })
 
   // KaTeX 本地资源

@@ -11,6 +11,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             list_books,
             new_book,
@@ -25,6 +27,9 @@ pub fn run() {
             read_chapter,
             write_chapter,
             new_chapter,
+            new_diary_entry,
+            rename_diary_entry,
+            update_diary_date,
             delete_chapter,
             rename_chapter,
             move_chapter,

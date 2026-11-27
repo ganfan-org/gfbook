@@ -20,11 +20,15 @@ interface CliOptions {
   books: string[]
   all: boolean
   lang: 'zh' | 'en'
+  siteTitle?: string
+  siteHome?: string
+  faviconHref?: string
 }
 
 interface BookInfo {
   title: string
   path: string
+  kind?: 'book' | 'diary'
   created_time: number
   updated_time: number
 }
@@ -57,6 +61,9 @@ function usage(): string {
     '  --books <路径>   要导出的书目录，逗号分隔，可重复',
     '  --all            导出书库根目录下的全部书（默认行为）',
     '  --lang <zh|en>   导出站点语言，默认 zh',
+    '  --site-title <名> 站点标题，默认「书库」',
+    '  --site-home <地址> 顶栏站点名的链接目标，默认按目录结构使用相对路径',
+    '  --favicon-href <地址> 所有页面引用的站点图标地址',
   ].join('\n')
 }
 
@@ -98,6 +105,15 @@ function parseArgs(argv: string[]): CliOptions {
       case '--lang':
         options.lang = takeValue() === 'en' ? 'en' : 'zh'
         break
+      case '--site-title':
+        options.siteTitle = takeValue()
+        break
+      case '--site-home':
+        options.siteHome = takeValue()
+        break
+      case '--favicon-href':
+        options.faviconHref = takeValue()
+        break
       case '--help':
       case '-h':
         console.log(usage())
@@ -117,6 +133,7 @@ function loadMeta(bookPath: string): BookInfo {
   const raw = fs.readFileSync(path.join(bookPath, 'gfbook.yaml'), 'utf8')
   const meta = (yaml.load(raw) ?? {}) as {
     title?: string
+    kind?: 'book' | 'diary'
     created_time?: number
     updated_time?: number
   }
@@ -124,6 +141,7 @@ function loadMeta(bookPath: string): BookInfo {
   return {
     title: String(meta.title ?? path.basename(bookPath)),
     path: bookPath,
+    kind: meta.kind === 'diary' ? 'diary' : 'book',
     created_time: Number(meta.created_time ?? 0) || now,
     updated_time: Number(meta.updated_time ?? 0) || now,
   }
@@ -346,6 +364,9 @@ async function main(): Promise<void> {
   const result = await exportBooksSite({
     books,
     outputDir: options.out,
+    siteTitle: options.siteTitle,
+    siteHome: options.siteHome,
+    faviconHref: options.faviconHref,
     onProgress: progress => {
       if (progress.stage === 'render' && progress.total > 0) {
         process.stdout.write(
