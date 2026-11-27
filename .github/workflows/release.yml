@@ -138,7 +138,7 @@ jobs:
             - updater 清单：latest.json
           releaseDraft: false
           prerelease: false
-          uploadUpdaterJson: true
+          includeUpdaterJson: true
           tauriScript: npm run tauri
           args: --target aarch64-apple-darwin
 
