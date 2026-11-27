@@ -5,7 +5,7 @@ use tauri::{Emitter, Manager};
 use uuid::Uuid;
 
 use crate::git;
-use crate::models::{BookInfo, BookMeta, Chapter, CommitInfo, flatten_chapters};
+use crate::models::{BookInfo, BookKind, BookMeta, Chapter, CommitInfo, flatten_chapters};
 
 const META_FILE: &str = "gfbook.yaml";
 const CHAPTERS_DIR: &str = "chapters";
@@ -32,6 +32,11 @@ fn load_config(app_handle: &tauri::AppHandle) -> Result<serde_json::Value, Strin
 
 fn save_config(app_handle: &tauri::AppHandle, config: &serde_json::Value) -> Result<(), String> {
     let config_path = get_config_path(app_handle)?;
+    // app_data_dir 首次使用时并不存在，必须先创建，否则 fs::write 会报 ENOENT
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create config dir: {}", e))?;
+    }
     let content = serde_json::to_string_pretty(config)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
     fs::write(&config_path, &content).map_err(|e| format!("Failed to write config: {}", e))?;
@@ -42,7 +47,12 @@ fn default_books_dir() -> PathBuf {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join("gfbooks")
+    // 开发构建使用独立书库，避免调试时的增删改污染日常使用的正式书库。
+    if cfg!(debug_assertions) {
+        PathBuf::from(home).join("gfbooks-dev")
+    } else {
+        PathBuf::from(home).join("gfbooks")
+    }
 }
 
 fn read_book_list(app_handle: &tauri::AppHandle) -> Result<Vec<BookInfo>, String> {
@@ -70,6 +80,7 @@ fn read_book_list(app_handle: &tauri::AppHandle) -> Result<Vec<BookInfo>, String
             books.push(BookInfo {
                 title: meta.title,
                 path: p.clone(),
+                kind: meta.kind,
                 created_time: meta.created_time,
                 updated_time: meta.updated_time,
             });
@@ -97,6 +108,7 @@ fn read_book_list(app_handle: &tauri::AppHandle) -> Result<Vec<BookInfo>, String
                     books.push(BookInfo {
                         title: meta.title,
                         path: path_str.clone(),
+                        kind: meta.kind,
                         created_time: meta.created_time,
                         updated_time: meta.updated_time,
                     });
@@ -149,9 +161,25 @@ fn load_meta(book_path: &str) -> Result<BookMeta, String> {
     let meta_path = PathBuf::from(book_path).join(META_FILE);
     let content =
         fs::read_to_string(&meta_path).map_err(|e| format!("Failed to read meta file: {}", e))?;
-    let meta: BookMeta =
+    let mut meta: BookMeta =
         serde_yaml::from_str(&content).map_err(|e| format!("Failed to parse meta file: {}", e))?;
+    normalize_legacy_diary_dates(&mut meta);
     Ok(meta)
+}
+
+/// 兼容旧日记数据：当条目没有 `date`、但 `id` 本身就是合法日期时，补上 `date`。
+/// 只在内存中补全，不在读取时写盘，避免打开书就产生变更。
+fn normalize_legacy_diary_dates(meta: &mut BookMeta) {
+    if meta.kind != BookKind::Diary {
+        return;
+    }
+    for chapter in &mut meta.chapters {
+        if chapter.date.is_none() {
+            if let Ok(date) = chrono::NaiveDate::parse_from_str(&chapter.id, "%Y-%m-%d") {
+                chapter.date = Some(date.format("%Y-%m-%d").to_string());
+            }
+        }
+    }
 }
 
 fn save_meta(book_path: &str, meta: &BookMeta) -> Result<(), String> {
@@ -267,7 +295,7 @@ fn validate_folder_name(name: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn new_book(title: String, app_handle: tauri::AppHandle, book_dir: Option<String>) -> Result<BookInfo, String> {
+pub fn new_book(title: String, app_handle: tauri::AppHandle, book_dir: Option<String>, kind: Option<BookKind>) -> Result<BookInfo, String> {
     let folder_name = slugify(&title);
     let book_path = match &book_dir {
         Some(dir) => {
@@ -288,9 +316,11 @@ pub fn new_book(title: String, app_handle: tauri::AppHandle, book_dir: Option<St
         .map_err(|e| format!("Failed to create book directory: {}", e))?;
 
     let now = current_timestamp();
+    let kind = kind.unwrap_or_default();
     let meta = BookMeta {
         title: title.clone(),
         schema_version: 1,
+        kind,
         created_time: now,
         updated_time: now,
         chapters: vec![],
@@ -309,13 +339,17 @@ pub fn new_book(title: String, app_handle: tauri::AppHandle, book_dir: Option<St
     }
 
     let path_str = book_path.to_string_lossy().to_string();
-    add_to_book_list(&app_handle, &path_str)?;
+    // 书已经落盘，登记失败不应让创建整体失败（默认目录会被 list_books 扫描到）
+    if let Err(e) = add_to_book_list(&app_handle, &path_str) {
+        eprintln!("Warning: failed to add book to config: {}", e);
+    }
 
     crate::logger::log_book_event(&app_handle, "create_book", &format!("created '{}'", title), &path_str);
 
     Ok(BookInfo {
         title,
         path: path_str,
+        kind,
         created_time: now,
         updated_time: now,
     })
@@ -345,9 +379,26 @@ pub fn rename_book(book_path: String, new_title: String, app_handle: tauri::AppH
     Ok(BookInfo {
         title: meta.title.clone(),
         path: path_str,
+        kind: meta.kind,
         created_time: meta.created_time,
         updated_time: meta.updated_time,
     })
+}
+
+/// 校验日记本的条目结构：顶层章节必须带合法日期，且不再嵌套子章节。
+/// 同一天可以有多条，因此这里不再校验日期唯一。
+fn validate_diary_chapters(chapters: &[Chapter]) -> Result<(), String> {
+    for chapter in chapters {
+        let date = chapter
+            .date
+            .as_deref()
+            .ok_or_else(|| format!("Diary entry '{}' is missing date", chapter.title))?;
+        validate_date(date)?;
+        if !chapter.chapters.is_empty() {
+            return Err(format!("Diary entry '{}' must not have sub-chapters", date));
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -364,11 +415,26 @@ pub fn import_book(folder_path: String, app_handle: tauri::AppHandle) -> Result<
         ));
     }
     let path_str = path.to_string_lossy().to_string();
-    let meta = load_meta(&path_str)?;
+    let mut meta = load_meta(&path_str)?;
+    if meta.kind == BookKind::Diary {
+        validate_diary_chapters(&meta.chapters)?;
+        // 规范化：顶层条目按日期倒序、同一天按创建时间正序写回，保证外部导入后时间线顺序稳定
+        let sorted = {
+            let mut chapters = meta.chapters.clone();
+            sort_diary_entries(&mut chapters);
+            chapters
+        };
+        if sorted.iter().map(|c| &c.id).ne(meta.chapters.iter().map(|c| &c.id)) {
+            meta.chapters = sorted;
+            save_meta(&path_str, &meta)?;
+            meta.updated_time = current_timestamp();
+        }
+    }
     add_to_book_list(&app_handle, &path_str)?;
     Ok(BookInfo {
         title: meta.title,
         path: path_str,
+        kind: meta.kind,
         created_time: meta.created_time,
         updated_time: meta.updated_time,
     })
@@ -853,6 +919,7 @@ fn make_chapter_from_file(
         title,
         created_time: now,
         updated_time: now,
+        date: None,
         chapters: vec![],
     })
 }
@@ -893,6 +960,7 @@ fn import_markdown_tree(
             title,
             created_time: now,
             updated_time: now,
+            date: None,
             chapters: vec![],
         };
 
@@ -976,6 +1044,7 @@ pub fn import_markdown_dir(
         let meta = BookMeta {
             title: book_title.clone(),
             schema_version: 1,
+            kind: BookKind::Book,
             created_time: now,
             updated_time: now,
             chapters,
@@ -1010,6 +1079,7 @@ pub fn import_markdown_dir(
     Ok(BookInfo {
         title: book_title,
         path: path_str,
+        kind: BookKind::Book,
         created_time: now,
         updated_time: now,
     })
@@ -1054,6 +1124,7 @@ pub fn new_chapter(
         title: title.clone(),
         created_time: now,
         updated_time: now,
+        date: None,
         chapters: vec![],
     };
 
@@ -1079,6 +1150,191 @@ pub fn new_chapter(
 
     crate::logger::log_book_event(&app_handle, "create_chapter", &format!("created '{}'", title), &book_path);
 
+    Ok(chapter)
+}
+
+/// 校验 `YYYY-MM-DD` 形式的日期。
+fn validate_date(date: &str) -> Result<(), String> {
+    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .map(|_| ())
+        .map_err(|_| format!("Invalid date '{}', expected YYYY-MM-DD", date))
+}
+
+/// 日记条目排序：日期倒序；同一天内按创建时间正序。
+fn sort_diary_entries(chapters: &mut [Chapter]) {
+    chapters.sort_by(|a, b| {
+        b.date
+            .cmp(&a.date)
+            .then_with(|| a.created_time.cmp(&b.created_time))
+    });
+}
+
+/// 把正文首行的标题替换为新标题（仅当它等于候选值之一）
+fn replace_leading_heading(
+    content: &str,
+    candidates: &[&str],
+    new_title: &str,
+) -> Option<String> {
+    let mut lines = content.lines();
+    let first = lines.next()?.trim_end();
+    if !candidates.iter().any(|c| first == format!("# {}", c)) {
+        return None;
+    }
+    let mut rest: Vec<&str> = lines.collect();
+    while rest.last().is_some_and(|line| line.trim().is_empty()) {
+        rest.pop();
+    }
+    let mut out = format!("# {}", new_title);
+    if !rest.is_empty() {
+        out.push('\n');
+        out.push_str(&rest.join("\n"));
+    }
+    out.push('\n');
+    Some(out)
+}
+
+/// 日记条目的标题已变化时，同步正文首行，避免正文与列表显示不一致
+fn sync_entry_heading(
+    book_path: &str,
+    chapter_id: &str,
+    candidates: &[&str],
+    new_title: &str,
+) {
+    let path = chapter_file_path(book_path, chapter_id);
+    let Ok(content) = fs::read_to_string(&path) else {
+        return;
+    };
+    if let Some(updated) = replace_leading_heading(&content, candidates, new_title) {
+        if let Err(e) = fs::write(&path, &updated) {
+            eprintln!("Warning: failed to update diary entry heading: {}", e);
+        }
+    }
+}
+
+/// 在日记本中新建某一天的条目；同一天允许多条。
+#[tauri::command]
+pub fn new_diary_entry(
+    book_path: String,
+    date: String,
+    app_handle: tauri::AppHandle,
+) -> Result<Chapter, String> {
+    validate_date(&date)?;
+
+    let mut meta = load_meta(&book_path)?;
+    if meta.kind != BookKind::Diary {
+        return Err("Book is not a diary".to_string());
+    }
+
+    let now = current_timestamp();
+    let id = Uuid::new_v4().to_string();
+    let chapter = Chapter {
+        id: id.clone(),
+        title: date.clone(),
+        created_time: now,
+        updated_time: now,
+        date: Some(date.clone()),
+        chapters: vec![],
+    };
+    meta.chapters.push(chapter.clone());
+    sort_diary_entries(&mut meta.chapters);
+    save_meta(&book_path, &meta)?;
+
+    let content = format!("# {}\n", date);
+    let file_path = chapter_file_path(&book_path, &id);
+    fs::create_dir_all(file_path.parent().unwrap())
+        .map_err(|e| format!("Failed to create chapters dir: {}", e))?;
+    fs::write(&file_path, &content).map_err(|e| format!("Failed to write diary entry: {}", e))?;
+
+    crate::logger::log_book_event(
+        &app_handle,
+        "create_diary_entry",
+        &format!("created diary entry {}", date),
+        &book_path,
+    );
+
+    Ok(chapter)
+}
+
+/// 重命名日记条目；只改 title，不动 date。正文首行是旧标题/旧日期时会同步。
+#[tauri::command]
+pub fn rename_diary_entry(
+    book_path: String,
+    chapter_id: String,
+    new_title: String,
+    app_handle: tauri::AppHandle,
+) -> Result<Chapter, String> {
+    let title = new_title.trim().to_string();
+    if title.is_empty() {
+        return Err("Title cannot be empty".to_string());
+    }
+    let mut meta = load_meta(&book_path)?;
+    if meta.kind != BookKind::Diary {
+        return Err("Book is not a diary".to_string());
+    }
+
+    let (old_title, old_date, chapter) = {
+        let chapter = find_chapter_mut(&mut meta.chapters, &chapter_id)
+            .ok_or_else(|| "Diary entry not found".to_string())?;
+        let old_title = chapter.title.clone();
+        let old_date = chapter.date.clone().unwrap_or_default();
+        chapter.title = title.clone();
+        chapter.updated_time = current_timestamp();
+        (old_title, old_date, chapter.clone())
+    };
+    save_meta(&book_path, &meta)?;
+    sync_entry_heading(&book_path, &chapter_id, &[&old_title, &old_date], &title);
+
+    crate::logger::log_book_event(
+        &app_handle,
+        "rename_diary_entry",
+        &format!("renamed diary entry {}", chapter_id),
+        &book_path,
+    );
+    Ok(chapter)
+}
+
+/// 修改日记条目的日期；日期与标题互不改写，只有默认标题（等于旧日期）会跟随日期更新。
+#[tauri::command]
+pub fn update_diary_date(
+    book_path: String,
+    chapter_id: String,
+    date: String,
+    app_handle: tauri::AppHandle,
+) -> Result<Chapter, String> {
+    validate_date(&date)?;
+
+    let mut meta = load_meta(&book_path)?;
+    if meta.kind != BookKind::Diary {
+        return Err("Book is not a diary".to_string());
+    }
+
+    let (old_title, old_date, chapter) = {
+        let chapter = find_chapter_mut(&mut meta.chapters, &chapter_id)
+            .ok_or_else(|| "Diary entry not found".to_string())?;
+        let old_title = chapter.title.clone();
+        let old_date = chapter.date.clone().unwrap_or_default();
+        if old_title == old_date {
+            chapter.title = date.clone();
+        }
+        chapter.date = Some(date.clone());
+        chapter.updated_time = current_timestamp();
+        (old_title, old_date, chapter.clone())
+    };
+    sort_diary_entries(&mut meta.chapters);
+    save_meta(&book_path, &meta)?;
+    sync_entry_heading(
+        &book_path,
+        &chapter_id,
+        &[&old_title, &old_date],
+        &chapter.title,
+    );
+
+    crate::logger::log_book_event(
+        &app_handle,
+        "update_diary_date",
+        &format!("moved diary entry {} to {}", chapter_id, date),
+        &book_path,
+    );
     Ok(chapter)
 }
 

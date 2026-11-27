@@ -16,6 +16,12 @@
       "default": 1,
       "description": "格式版本，缺省视为 1"
     },
+    "kind": {
+      "type": "string",
+      "enum": ["book", "diary"],
+      "default": "book",
+      "description": "书的形态：book 为普通书，diary 为按日期组织的日记本；缺省视为 book"
+    },
     "created_time": {
       "type": "integer",
       "minimum": 0,
@@ -42,7 +48,7 @@
           "type": "string",
           "minLength": 1,
           "pattern": "^[A-Za-z0-9_-]+$",
-          "description": "章节标识，同时是 chapters/<id>.md 的文件名，同一本书内唯一"
+          "description": "章节标识，同时是 chapters/<id>.md 的文件名，同一本书内唯一。日记本中与 date 相互独立，推荐 UUID；历史数据中 id 等于日期仍可读取"
         },
         "title": {
           "type": "string",
@@ -57,6 +63,11 @@
           "type": "integer",
           "minimum": 0,
           "description": "更新时间，毫秒时间戳"
+        },
+        "date": {
+          "type": "string",
+          "format": "date",
+          "description": "日记条目日期（YYYY-MM-DD），仅日记本使用；同一天可以有多条，日期不唯一。同一天内按 created_time 正序排列"
         },
         "chapters": {
           "type": "array",

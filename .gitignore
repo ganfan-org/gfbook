@@ -31,6 +31,7 @@ scripts/_env.sh
 .eslintcache
 .changelog_backups
 target
+.screenshots/
 CLAUDE.md
 .vfox.toml
 .vfox/
