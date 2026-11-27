@@ -6,6 +6,9 @@ import {
   readChapter,
   writeChapter,
   newChapter as apiNewChapter,
+  newDiaryEntry as apiNewDiaryEntry,
+  renameDiaryEntry as apiRenameDiaryEntry,
+  updateDiaryDate as apiUpdateDiaryDate,
   deleteChapter as apiDeleteChapter,
   renameChapter as apiRenameChapter,
   moveChapter as apiMoveChapter,
@@ -64,6 +67,36 @@ export function useBookChapters(bookPath: string | null) {
     async (parentId: string | null, title: string): Promise<Chapter> => {
       if (!bookPath) throw new Error('No book selected')
       const chapter = await apiNewChapter(bookPath, parentId, title)
+      await refreshMeta()
+      return chapter
+    },
+    [bookPath, refreshMeta],
+  )
+
+  const createDiaryEntry = useCallback(
+    async (date: string): Promise<Chapter> => {
+      if (!bookPath) throw new Error('No book selected')
+      const chapter = await apiNewDiaryEntry(bookPath, date)
+      await refreshMeta()
+      return chapter
+    },
+    [bookPath, refreshMeta],
+  )
+
+  const renameDiaryEntry = useCallback(
+    async (chapterId: string, title: string): Promise<Chapter> => {
+      if (!bookPath) throw new Error('No book selected')
+      const chapter = await apiRenameDiaryEntry(bookPath, chapterId, title)
+      await refreshMeta()
+      return chapter
+    },
+    [bookPath, refreshMeta],
+  )
+
+  const changeDiaryDate = useCallback(
+    async (chapterId: string, date: string): Promise<Chapter> => {
+      if (!bookPath) throw new Error('No book selected')
+      const chapter = await apiUpdateDiaryDate(bookPath, chapterId, date)
       await refreshMeta()
       return chapter
     },
@@ -132,6 +165,9 @@ export function useBookChapters(bookPath: string | null) {
     selectChapter,
     saveChapter,
     createChapter,
+    createDiaryEntry,
+    renameDiaryEntry,
+    changeDiaryDate,
     removeChapter,
     renameChapterById,
     moveChapterTo,

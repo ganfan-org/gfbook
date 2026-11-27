@@ -1,13 +1,17 @@
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 
-import type { BookInfo, BookMeta, Chapter, CommitInfo } from '../types'
+import type { BookInfo, BookKind, BookMeta, Chapter, CommitInfo } from '../types'
 
 export function listBooks(): Promise<BookInfo[]> {
   return invoke('list_books')
 }
 
-export function newBook(title: string, bookDir?: string): Promise<BookInfo> {
-  return invoke('new_book', { title, bookDir })
+export function newBook(
+  title: string,
+  bookDir?: string,
+  kind?: BookKind,
+): Promise<BookInfo> {
+  return invoke('new_book', { title, bookDir, kind })
 }
 
 export function deleteBook(bookPath: string): Promise<void> {
@@ -94,6 +98,32 @@ export function newChapter(
   title: string,
 ): Promise<Chapter> {
   return invoke('new_chapter', { bookPath, parentId, title })
+}
+
+/** 在日记本中新建某一天的条目（YYYY-MM-DD），同一天可以有多篇 */
+export function newDiaryEntry(
+  bookPath: string,
+  date: string,
+): Promise<Chapter> {
+  return invoke('new_diary_entry', { bookPath, date })
+}
+
+/** 重命名日记条目：只改标题，不改日期 */
+export function renameDiaryEntry(
+  bookPath: string,
+  chapterId: string,
+  newTitle: string,
+): Promise<Chapter> {
+  return invoke('rename_diary_entry', { bookPath, chapterId, newTitle })
+}
+
+/** 修改日记条目的日期：标题保持原样，默认标题会跟随日期更新 */
+export function updateDiaryDate(
+  bookPath: string,
+  chapterId: string,
+  date: string,
+): Promise<Chapter> {
+  return invoke('update_diary_date', { bookPath, chapterId, date })
 }
 
 export function deleteChapter(

@@ -11,6 +11,7 @@ import MoreVertIcon from '@mui/icons-material/MoreVert'
 import SearchIcon from '@mui/icons-material/Search'
 import SettingsIcon from '@mui/icons-material/Settings'
 import {
+  Alert,
   Box,
   Typography,
   Button,
@@ -41,7 +42,7 @@ import ImportMarkdownDialog from '../components/ImportMarkdownDialog'
 import SearchDialog from '../components/SearchDialog'
 import { useBooks } from '../hooks/useBooks'
 import { changeLang, currentLang, type AppLang } from '../i18n'
-import type { BookInfo } from '../types'
+import type { BookInfo, BookKind } from '../types'
 import { readLogs, type LogEntry } from '../utils/commands'
 import { formatBookDate } from '../utils/date'
 
@@ -72,6 +73,7 @@ function hashColor(title: string): [string, string] {
 // ═══════════════════════════════════════════
 function BookCover({
   title,
+  kind,
   updatedTime,
   onClick,
   onRename,
@@ -79,6 +81,7 @@ function BookCover({
   onExport,
 }: {
   title: string
+  kind?: BookKind
   updatedTime: number
   onClick: () => void
   onRename: (t: string) => void
@@ -165,6 +168,35 @@ function BookCover({
               >
                 {initials}
               </Typography>
+              {kind === 'diary' && (
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    top: 12,
+                    left: 12,
+                    px: 0.75,
+                    py: 0.25,
+                    borderRadius: 1,
+                    zIndex: 1,
+                    bgcolor: isLight
+                      ? 'rgba(255,255,255,0.6)'
+                      : 'rgba(0,0,0,0.25)',
+                    backdropFilter: 'blur(6px)',
+                  }}
+                >
+                  <Typography
+                    sx={{
+                      color: textColor,
+                      fontSize: '0.65rem',
+                      fontWeight: 600,
+                      letterSpacing: 0.5,
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {t('bookshelf.diaryBadge')}
+                  </Typography>
+                </Box>
+              )}
               <Box sx={{ position: 'relative', zIndex: 1, mt: 'auto' }}>
                 <Typography
                   sx={{
@@ -301,7 +333,9 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
   const { books, loading, createBook, removeBook, changeBookName, importExternalBook, importMarkdownBook, getGlobalSettings, setGlobalSettings } = useBooks()
   const [newDialogOpen, setNewDialogOpen] = useState(false)
   const [newTitle, setNewTitle] = useState('')
+  const [newKind, setNewKind] = useState<BookKind>('book')
   const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
   const [deletingPath, setDeletingPath] = useState<string | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
@@ -319,11 +353,18 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
     if (!title || creating) return
     try {
       setCreating(true)
-      await createBook(title)
+      setCreateError(null)
+      await createBook(title, newKind)
       setNewTitle('')
       setNewDialogOpen(false)
     } catch (e) {
       console.error('Failed to create book:', e)
+      const message = e instanceof Error ? e.message : String(e)
+      setCreateError(
+        message.includes('already exists')
+          ? t('bookshelf.bookExists')
+          : message || t('bookshelf.createFailed'),
+      )
     } finally {
       setCreating(false)
     }
@@ -384,7 +425,14 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
           >
             {t('bookshelf.import')}
           </Button>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setNewDialogOpen(true)}>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => {
+              setCreateError(null)
+              setNewDialogOpen(true)
+            }}
+          >
             {t('bookshelf.newBook')}
           </Button>
           <IconButton
@@ -480,7 +528,15 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
             {t('bookshelf.emptyHint')}
           </Typography>
           <Box display="flex" gap={1} mt={1}>
-            <Button variant="contained" size="large" startIcon={<AddIcon />} onClick={() => setNewDialogOpen(true)}>
+            <Button
+              variant="contained"
+              size="large"
+              startIcon={<AddIcon />}
+              onClick={() => {
+                setCreateError(null)
+                setNewDialogOpen(true)
+              }}
+            >
               {t('bookshelf.createBook')}
             </Button>
             <Button variant="outlined" size="large" startIcon={<FolderOpenIcon />} onClick={handleImport}>
@@ -502,6 +558,7 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
             <BookCover
               key={book.path}
               title={book.title}
+              kind={book.kind}
               updatedTime={book.updated_time}
               onClick={() => onOpenBook(book)}
               onRename={newTitle => handleRename(book.path, newTitle)}
@@ -516,16 +573,50 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
       )}
 
       {/* 新建书弹窗 */}
-      <Dialog open={newDialogOpen} onClose={() => !creating && setNewDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>{t('bookshelf.newBook')}</DialogTitle>
+      <Dialog
+        open={newDialogOpen}
+        onClose={() => {
+          if (creating) return
+          setNewDialogOpen(false)
+          setCreateError(null)
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          {newKind === 'diary' ? t('bookshelf.newDiary') : t('bookshelf.newBook')}
+        </DialogTitle>
         <DialogContent>
+          <ToggleButtonGroup
+            size="small"
+            exclusive
+            fullWidth
+            value={newKind}
+            onChange={(_, value: BookKind | null) => {
+              if (value) setNewKind(value)
+            }}
+            sx={{ mt: 1 }}
+          >
+            <ToggleButton value="book">{t('bookshelf.kindBook')}</ToggleButton>
+            <ToggleButton value="diary">{t('bookshelf.kindDiary')}</ToggleButton>
+          </ToggleButtonGroup>
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ display: 'block', mt: 1 }}
+          >
+            {newKind === 'diary' ? t('bookshelf.diaryHint') : t('bookshelf.bookHint')}
+          </Typography>
           <TextField
             autoFocus
             margin="dense"
-            label={t('bookshelf.bookTitle')}
+            label={newKind === 'diary' ? t('bookshelf.diaryName') : t('bookshelf.bookTitle')}
             fullWidth
             value={newTitle}
-            onChange={e => setNewTitle(e.target.value)}
+            onChange={e => {
+              setNewTitle(e.target.value)
+              if (createError) setCreateError(null)
+            }}
             onKeyDown={e => {
               if (e.key === 'Enter' && newTitle.trim()) {
                 e.preventDefault()
@@ -534,6 +625,15 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
             }}
             disabled={creating}
           />
+          {createError && (
+            <Alert
+              severity="error"
+              sx={{ mt: 2 }}
+              onClose={() => setCreateError(null)}
+            >
+              {createError}
+            </Alert>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setNewDialogOpen(false)} disabled={creating}>{t('common.cancel')}</Button>

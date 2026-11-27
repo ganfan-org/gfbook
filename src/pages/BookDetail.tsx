@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 import BookSettingsDialog from '../components/BookSettingsDialog'
 import ChapterEditor from '../components/ChapterEditor'
 import ChapterTree from '../components/ChapterTree'
+import DiaryTimeline from '../components/DiaryTimeline'
 import SearchDialog from '../components/SearchDialog'
 import { useBook } from '../hooks/useBook'
 import type { BookInfo, Chapter } from '../types'
@@ -55,6 +56,9 @@ export default function BookDetail({
     selectChapter,
     saveChapter,
     createChapter,
+    createDiaryEntry,
+    renameDiaryEntry,
+    changeDiaryDate,
     removeChapter,
     renameChapterById,
     moveUp,
@@ -278,6 +282,56 @@ export default function BookDetail({
     return find(meta.chapters)
   }, [meta, selectedChapterId])
 
+  const isDiary = (meta?.kind ?? bookInfo.kind) === 'diary'
+
+  const diaryEntries = useMemo(() => {
+    if (!meta) return []
+    return meta.chapters.filter((ch) => !!ch.date)
+  }, [meta])
+
+  // 打开日记本时默认落在最近一篇（仅首次加载时自动选择）
+  const autoSelectedRef = useRef(false)
+  useEffect(() => {
+    if (autoSelectedRef.current) return
+    if (!isDiary || !meta || selectedChapterId || initialChapterId) return
+    autoSelectedRef.current = true
+    const sorted = [...diaryEntries].sort((a, b) => {
+      const byDate = (b.date ?? '').localeCompare(a.date ?? '')
+      if (byDate !== 0) return byDate
+      // 同一天多条时，默认打开最近创建的一篇
+      return (b.created_time ?? 0) - (a.created_time ?? 0)
+    })
+    if (sorted.length > 0) selectChapter(sorted[0].id)
+  }, [isDiary, meta, selectedChapterId, initialChapterId, diaryEntries, selectChapter])
+
+  const handleWriteDate = useCallback(
+    async (date: string) => {
+      try {
+        const chapter = await createDiaryEntry(date)
+        await selectChapter(chapter.id)
+      } catch (e) {
+        console.error('Failed to create diary entry:', e)
+      }
+    },
+    [selectChapter, createDiaryEntry],
+  )
+
+  const handleRenameDiaryEntry = useCallback(
+    async (id: string, title: string) => {
+      await renameDiaryEntry(id, title)
+      if (selectedChapterId === id) await selectChapter(id)
+    },
+    [renameDiaryEntry, selectedChapterId, selectChapter],
+  )
+
+  const handleChangeDiaryDate = useCallback(
+    async (id: string, date: string) => {
+      await changeDiaryDate(id, date)
+      if (selectedChapterId === id) await selectChapter(id)
+    },
+    [changeDiaryDate, selectedChapterId, selectChapter],
+  )
+
   const handleAddChapter = useCallback((parentId: string | null) => {
     setAddParentId(parentId)
     setAddTitle('')
@@ -407,19 +461,30 @@ export default function BookDetail({
           </Box>
           <Divider />
           <Box sx={{ flex: 1, overflow: 'auto', p: 1 }}>
-            {meta && (
-              <ChapterTree
-                chapters={meta.chapters}
-                selectedId={selectedChapterId}
-                onSelect={selectChapter}
-                onAddChild={handleAddChapter}
-                onRename={handleRenameChapter}
-                onDelete={handleDeleteChapter}
-                onMoveUp={moveUp}
-                onMoveDown={moveDown}
-                onMoveChapter={handleMoveChapter}
-              />
-            )}
+            {meta &&
+              (isDiary ? (
+                <DiaryTimeline
+                  entries={diaryEntries}
+                  selectedId={selectedChapterId}
+                  onSelect={selectChapter}
+                  onCreate={handleWriteDate}
+                  onDelete={handleDeleteChapter}
+                  onRename={handleRenameDiaryEntry}
+                  onChangeDate={handleChangeDiaryDate}
+                />
+              ) : (
+                <ChapterTree
+                  chapters={meta.chapters}
+                  selectedId={selectedChapterId}
+                  onSelect={selectChapter}
+                  onAddChild={handleAddChapter}
+                  onRename={handleRenameChapter}
+                  onDelete={handleDeleteChapter}
+                  onMoveUp={moveUp}
+                  onMoveDown={moveDown}
+                  onMoveChapter={handleMoveChapter}
+                />
+              ))}
           </Box>
           <Box
             onClick={async () => {
@@ -549,7 +614,9 @@ export default function BookDetail({
               color: 'text.secondary',
             }}
           >
-            <Typography variant="h6">{t('bookDetail.selectChapter')}</Typography>
+            <Typography variant="h6">
+              {t(isDiary ? 'diary.selectEntry' : 'bookDetail.selectChapter')}
+            </Typography>
           </Box>
         )}
       </Box>

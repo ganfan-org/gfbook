@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 
-import type { BookInfo } from '../types';
+import type { BookInfo, BookKind } from '../types';
 import { listBooks, newBook as apiNewBook, deleteBook as apiDeleteBook, renameBook as apiRenameBook, importBook as apiImportBook, importMarkdownDir as apiImportMarkdownDir, getBooksDir as apiGetBooksDir, setBooksDir as apiSetBooksDir, getGlobalGitUser, setGlobalGitUser, getProxySetting, setProxySetting } from '../utils/commands';
 
 export function useBooks() {
@@ -23,8 +23,8 @@ export function useBooks() {
     refresh();
   }, [refresh]);
 
-  const createBook = useCallback(async (title: string, bookDir?: string): Promise<BookInfo> => {
-    const book = await apiNewBook(title, bookDir);
+  const createBook = useCallback(async (title: string, kind?: BookKind, bookDir?: string): Promise<BookInfo> => {
+    const book = await apiNewBook(title, bookDir, kind);
     await refresh();
     return book;
   }, [refresh]);
