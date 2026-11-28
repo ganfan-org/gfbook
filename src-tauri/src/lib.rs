@@ -51,6 +51,7 @@ pub fn run() {
             get_file_diff,
             scan_library_problems,
             scan_book_problems,
+            get_backend_info,
             enable_version_control,
             get_book_identity,
             set_book_identity,

@@ -194,6 +194,20 @@ const en: typeof zh = {
     noRemote: 'No remote',
     uncommitted: '{{n}} uncommitted',
   },
+  backend: {
+    title: 'Frontend and backend versions do not match',
+    stale:
+      'This interface requires backend API {{expected}}, but the running backend is {{actual}} (built {{builtAt}}).',
+    missing:
+      'The running backend has no version check command, so it is almost certainly an old binary.',
+    failed: 'Could not verify the backend version: {{error}}',
+    steps:
+      'Quit GanfanBook completely, then run the command below from the project directory. Do not open the old target/debug/GanfanBook or the /Applications build directly.',
+    commands: 'npm run dev:clean',
+    recheck: 'Check again',
+    checking: 'Checking…',
+    unknownTime: 'unknown time',
+  },
   problems: {
     title: 'Problems',
     count: '{{n}} problems',

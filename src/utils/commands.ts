@@ -2,6 +2,7 @@ import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 
 import type {
   ActivityItem,
+  BackendInfo,
   BookIdentity,
   BookInfo,
   BookKind,
@@ -237,6 +238,14 @@ export function scanLibraryProblems(): Promise<BookProblems[]> {
 /** 扫描单本书的内容问题 */
 export function scanBookProblems(bookPath: string): Promise<BookProblems> {
   return invoke('scan_book_problems', { bookPath })
+}
+
+/** 前端要求的后端契约版本，必须与 src-tauri/src/commands.rs 的 BACKEND_API_LEVEL 一致 */
+export const EXPECTED_BACKEND_API = 2
+
+/** 读取后端版本信息，用于检测前端与旧二进制不匹配 */
+export function getBackendInfo(): Promise<BackendInfo> {
+  return invoke('get_backend_info')
 }
 
 /** 合并提交历史与应用事件，按时间倒序 */

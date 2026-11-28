@@ -13,10 +13,12 @@ use crate::book_fs::{
 };
 use crate::error::AppError;
 use crate::models::{
-    flatten_chapters, ActivityItem, BookIdentity, BookInfo, BookKind, BookMeta, BookProblems, Chapter, CommitInfo,
-    FileDiff, RepoState,
+    flatten_chapters, ActivityItem, BackendInfo, BookIdentity, BookInfo, BookKind, BookMeta, BookProblems, Chapter,
+    CommitInfo, FileDiff, RepoState,
 };
 
+/// 前端要求的后端契约版本。新增或变更命令时递增。
+pub const BACKEND_API_LEVEL: u32 = 2;
 use crate::repo;
 
 const CONFIG_FILE: &str = "gfbook-config.json";
@@ -200,6 +202,23 @@ pub fn scan_library_problems(app_handle: tauri::AppHandle) -> Vec<BookProblems> 
 #[tauri::command]
 pub fn scan_book_problems(book_path: String) -> BookProblems {
     crate::diagnostics::scan_book(&book_path)
+}
+
+/// 前后端版本握手。前端通过 api_level 判断当前二进制是否与界面匹配。
+#[tauri::command]
+pub fn get_backend_info() -> BackendInfo {
+    let built_at = std::env::current_exe()
+        .and_then(|path| path.metadata())
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    BackendInfo {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        api_level: BACKEND_API_LEVEL,
+        built_at,
+    }
 }
 
 fn library_book_paths(app_handle: &tauri::AppHandle) -> Vec<String> {

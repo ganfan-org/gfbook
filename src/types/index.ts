@@ -114,3 +114,10 @@ export interface BookProblems {
   book_title: string;
   problems: Problem[];
 }
+
+/** 后端启动时返回的版本信息 */
+export interface BackendInfo {
+  version: string;
+  api_level: number;
+  built_at: number;
+}

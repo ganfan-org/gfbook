@@ -2,6 +2,8 @@ import { ThemeProvider, CssBaseline, Snackbar, Button, Box } from '@mui/material
 import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import BackendMismatchDialog from './components/BackendMismatchDialog'
+import { useBackendHealth } from './hooks/useBackendHealth'
 import { useUpdater } from './hooks/useUpdater'
 import BookDetail from './pages/BookDetail'
 import BookShelf from './pages/BookShelf'
@@ -25,6 +27,7 @@ function systemMode(): ThemeMode {
 function App() {
   const { t } = useTranslation()
   const updater = useUpdater()
+  const backend = useBackendHealth()
   const [mode, setMode] = useState<ThemeMode>(() => readSavedMode() ?? systemMode())
   const [currentBook, setCurrentBook] = useState<BookInfo | null>(null)
   const [pendingChapterId, setPendingChapterId] = useState<string | null>(null)
@@ -79,6 +82,7 @@ function App() {
           mode={mode}
         />
       )}
+      <BackendMismatchDialog health={backend} />
       <Snackbar
         open={updater.status === 'ready'}
         message={t('updater.ready')}

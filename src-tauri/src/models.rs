@@ -157,6 +157,16 @@ pub struct BookProblems {
     pub problems: Vec<Problem>,
 }
 
+/// 前后端版本握手信息。
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct BackendInfo {
+    pub version: String,
+    /// 每新增或变更一个命令都要递增，前端据此判断二进制是否过旧。
+    pub api_level: u32,
+    /// 当前可执行文件的构建时间（Unix 秒）。
+    pub built_at: u64,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SearchLine {
     pub line: usize,

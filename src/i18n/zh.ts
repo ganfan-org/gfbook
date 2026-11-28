@@ -191,6 +191,17 @@ const zh = {
     noRemote: '未配置远程',
     uncommitted: '{{n}} 处未提交',
   },
+  backend: {
+    title: '界面与后端版本不一致',
+    stale: '当前界面需要后端 API {{expected}}，正在运行的后端为 {{actual}}（构建于 {{builtAt}}）。',
+    missing: '当前运行的后端没有版本检查接口，几乎可以确定是旧二进制。',
+    failed: '无法确认后端版本：{{error}}',
+    steps: '请完全退出 GanfanBook，然后在项目目录运行下面的命令。不要直接打开 target/debug/GanfanBook 或 /Applications 中的旧版本。',
+    commands: 'npm run dev:clean',
+    recheck: '重新检查',
+    checking: '正在检查…',
+    unknownTime: '未知时间',
+  },
   problems: {
     title: '问题',
     count: '{{n}} 个问题',
