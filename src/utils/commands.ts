@@ -6,6 +6,7 @@ import type {
   BookInfo,
   BookKind,
   BookMeta,
+  BookProblems,
   Chapter,
   CommitInfo,
   FileDiff,
@@ -226,6 +227,16 @@ export function enableVersionControl(bookPath: string): Promise<RepoState> {
 /** 读取单个改动文件相对 HEAD 的差异 */
 export function getFileDiff(bookPath: string, path: string): Promise<FileDiff> {
   return invoke('get_file_diff', { bookPath, path })
+}
+
+/** 扫描全库内容问题 */
+export function scanLibraryProblems(): Promise<BookProblems[]> {
+  return invoke('scan_library_problems')
+}
+
+/** 扫描单本书的内容问题 */
+export function scanBookProblems(bookPath: string): Promise<BookProblems> {
+  return invoke('scan_book_problems', { bookPath })
 }
 
 /** 合并提交历史与应用事件，按时间倒序 */

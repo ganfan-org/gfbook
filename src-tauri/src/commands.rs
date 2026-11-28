@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tauri::{Emitter, Manager};
 use uuid::Uuid;
@@ -13,9 +13,10 @@ use crate::book_fs::{
 };
 use crate::error::AppError;
 use crate::models::{
-    flatten_chapters, ActivityItem, BookIdentity, BookInfo, BookKind, BookMeta, Chapter, CommitInfo, FileDiff,
-    RepoState,
+    flatten_chapters, ActivityItem, BookIdentity, BookInfo, BookKind, BookMeta, BookProblems, Chapter, CommitInfo,
+    FileDiff, RepoState,
 };
+
 use crate::repo;
 
 const CONFIG_FILE: &str = "gfbook-config.json";
@@ -182,6 +183,52 @@ pub fn set_books_dir(app_handle: tauri::AppHandle, dir: String) -> Result<String
 #[tauri::command]
 pub fn list_books(app_handle: tauri::AppHandle) -> Result<Vec<BookInfo>, String> {
     read_book_list(&app_handle)
+}
+
+/// 扫描全库问题。目录来源与书架一致，但包含元数据解析失败的书籍。
+#[tauri::command]
+pub fn scan_library_problems(app_handle: tauri::AppHandle) -> Vec<BookProblems> {
+    let mut result: Vec<BookProblems> = library_book_paths(&app_handle)
+        .iter()
+        .map(|path| crate::diagnostics::scan_book(path))
+        .filter(|book| !book.problems.is_empty())
+        .collect();
+    result.sort_by(|a, b| a.book_title.to_lowercase().cmp(&b.book_title.to_lowercase()));
+    result
+}
+
+#[tauri::command]
+pub fn scan_book_problems(book_path: String) -> BookProblems {
+    crate::diagnostics::scan_book(&book_path)
+}
+
+fn library_book_paths(app_handle: &tauri::AppHandle) -> Vec<String> {
+    let config = load_config(app_handle).unwrap_or_default();
+    let mut paths: Vec<String> = config
+        .get("books")
+        .and_then(|value| value.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|value| value.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let default_dir = default_books_dir();
+    if default_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&default_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() && path.join(META_FILE).exists() {
+                    paths.push(path.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    paths.retain(|path| Path::new(path).join(META_FILE).exists() && seen.insert(path.clone()));
+    paths
 }
 
 fn validate_folder_name(name: &str) -> Result<(), String> {

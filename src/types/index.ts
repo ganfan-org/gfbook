@@ -95,3 +95,22 @@ export interface FileDiff {
   binary: boolean;
   truncated: boolean;
 }
+
+export type ProblemSeverity = 'error' | 'warning';
+
+export interface Problem {
+  kind: string;
+  severity: ProblemSeverity;
+  message: string;
+  detail: string | null;
+  chapter_id: string | null;
+  chapter_title: string | null;
+  file: string | null;
+  line: number | null;
+}
+
+export interface BookProblems {
+  book_path: string;
+  book_title: string;
+  problems: Problem[];
+}

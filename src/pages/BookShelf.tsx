@@ -3,6 +3,7 @@ import DarkModeIcon from '@mui/icons-material/DarkMode'
 import DeleteIcon from '@mui/icons-material/Delete'
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined'
 import DriveFileRenameOutlineIcon from '@mui/icons-material/DriveFileRenameOutline'
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined'
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'
 import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined'
@@ -32,19 +33,21 @@ import {
   Divider,
   ToggleButton,
   ToggleButtonGroup,
+  Badge,
 } from '@mui/material'
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import ExportDialog from '../components/ExportDialog'
 import ImportMarkdownDialog from '../components/ImportMarkdownDialog'
+import ProblemsDialog from '../components/ProblemsDialog'
 import SearchDialog from '../components/SearchDialog'
 import { useBooks } from '../hooks/useBooks'
 import type { UpdaterApi } from '../hooks/useUpdater'
 import { changeLang, currentLang, type AppLang } from '../i18n'
 import type { BookInfo, BookKind } from '../types'
-import { readLogs, type LogEntry } from '../utils/commands'
+import { readLogs, scanLibraryProblems, type LogEntry } from '../utils/commands'
 import { formatBookDate } from '../utils/date'
 
 // ═══════════════════════════════════════════
@@ -349,6 +352,23 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode, updater }: 
   const [globalGitEmail, setGlobalGitEmail] = useState('')
   const [globalProxy, setGlobalProxy] = useState('')
   const [logs, setLogs] = useState<LogEntry[]>([])
+  const [problemsOpen, setProblemsOpen] = useState(false)
+  const [problemTotal, setProblemTotal] = useState(0)
+
+  const refreshProblemCount = useCallback(async () => {
+    try {
+      const result = await scanLibraryProblems()
+      setProblemTotal(
+        result.reduce((sum, book) => sum + book.problems.length, 0),
+      )
+    } catch {
+      setProblemTotal(0)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshProblemCount()
+  }, [refreshProblemCount, books.length])
 
   const handleNewBook = async () => {
     const title = newTitle.trim()
@@ -445,6 +465,22 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode, updater }: 
             aria-label={t('bookshelf.export')}
           >
             <FileDownloadOutlinedIcon />
+          </IconButton>
+          <IconButton
+            aria-label={t('problems.title')}
+            onClick={() => {
+              void refreshProblemCount()
+              setProblemsOpen(true)
+            }}
+          >
+            <Badge
+              badgeContent={problemTotal}
+              color="error"
+              max={99}
+              invisible={problemTotal === 0}
+            >
+              <ErrorOutlineIcon />
+            </Badge>
           </IconButton>
           <IconButton onClick={() => setSearchOpen(true)} aria-label={t('bookshelf.search')}>
             <SearchIcon />
@@ -841,6 +877,17 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode, updater }: 
           const book = books.find(b => b.path === bookPath)
           if (book) onOpenBook(book, chapterId)
           setSearchOpen(false)
+        }}
+      />
+
+      <ProblemsDialog
+        open={problemsOpen}
+        onClose={() => setProblemsOpen(false)}
+        onOpenProblem={(bookPath, chapterId) => {
+          const book = books.find(b => b.path === bookPath)
+          if (!book) return
+          setProblemsOpen(false)
+          onOpenBook(book, chapterId ?? undefined)
         }}
       />
     </Box>

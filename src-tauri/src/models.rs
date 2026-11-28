@@ -134,6 +134,29 @@ pub struct FileDiff {
     pub truncated: bool,
 }
 
+/// 书籍内容诊断问题。
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Problem {
+    pub kind: String,
+    /// `error` | `warning`
+    pub severity: String,
+    /// 英文兜底文案；界面按 kind 本地化。
+    pub message: String,
+    pub detail: Option<String>,
+    pub chapter_id: Option<String>,
+    pub chapter_title: Option<String>,
+    /// 相对书籍根目录的文件路径。
+    pub file: Option<String>,
+    pub line: Option<u32>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct BookProblems {
+    pub book_path: String,
+    pub book_title: String,
+    pub problems: Vec<Problem>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SearchLine {
     pub line: usize,

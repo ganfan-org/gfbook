@@ -194,6 +194,27 @@ const en: typeof zh = {
     noRemote: 'No remote',
     uncommitted: '{{n}} uncommitted',
   },
+  problems: {
+    title: 'Problems',
+    count: '{{n}} problems',
+    loading: 'Scanning…',
+    empty: 'No problems found',
+    refresh: 'Rescan',
+    kinds: {
+      metaMissingFile: 'Chapter is registered but its file is missing: {{file}}',
+      orphanFile: 'Chapter file is not registered in metadata: {{file}}',
+      titleMismatch:
+        'First heading is “{{heading}}”, which differs from the chapter title',
+      emptyTitle: 'Chapter title is empty',
+      duplicateTitle: 'Duplicate title at the same level: {{title}}',
+      missingImage: 'Referenced image is missing: {{path}}',
+      conflictMarker: 'Merge conflict marker found at line {{line}}',
+      schemaVersion: 'Unknown schema_version: {{version}}',
+      metaParse: 'Failed to parse gfbook.yaml: {{detail}}',
+      diaryDateMissing: 'Diary entry is missing a date',
+      diaryDateMismatch: 'Diary entry date does not match its id: {{detail}}',
+    },
+  },
   toolbar: {
     paragraph: 'Paragraph',
     bold: 'Bold',

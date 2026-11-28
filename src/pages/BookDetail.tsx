@@ -1,3 +1,4 @@
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import HomeIcon from '@mui/icons-material/Home'
 import SearchIcon from '@mui/icons-material/Search'
 import SettingsIcon from '@mui/icons-material/Settings'
@@ -24,6 +25,7 @@ import ChapterEditor from '../components/ChapterEditor'
 import type { SaveStatus } from '../components/ChapterEditor'
 import ChapterTree from '../components/ChapterTree'
 import DiaryTimeline from '../components/DiaryTimeline'
+import ProblemsDialog from '../components/ProblemsDialog'
 import SearchDialog from '../components/SearchDialog'
 import { useBook } from '../hooks/useBook'
 import { useBookActivity } from '../hooks/useBookActivity'
@@ -38,6 +40,7 @@ import {
   renameBook,
   resolveConflict,
   revealInFinder,
+  scanBookProblems,
   setBookIdentity,
 } from '../utils/commands'
 
@@ -106,6 +109,8 @@ export default function BookDetail({
   const [identity, setIdentity] = useState<BookIdentity | null>(null)
   const [identityLoading, setIdentityLoading] = useState(false)
   const [gitError, setGitError] = useState<string | null>(null)
+  const [problemTotal, setProblemTotal] = useState(0)
+  const [problemsOpen, setProblemsOpen] = useState(false)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved')
   const [saveError, setSaveError] = useState<string | null>(null)
   const saveRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -132,6 +137,19 @@ export default function BookDetail({
     error: activityError,
     refresh: refreshActivity,
   } = useBookActivity(bookPath, commitDialogOpen)
+
+  const refreshProblemCount = useCallback(async () => {
+    try {
+      const result = await scanBookProblems(bookPath)
+      setProblemTotal(result.problems.length)
+    } catch {
+      setProblemTotal(0)
+    }
+  }, [bookPath])
+
+  useEffect(() => {
+    void refreshProblemCount()
+  }, [refreshProblemCount])
 
   const refreshIdentity = useCallback(async () => {
     setIdentityLoading(true)
@@ -687,6 +705,31 @@ export default function BookDetail({
                 />
               ))}
           </Box>
+          {problemTotal > 0 && (
+            <Box
+              onClick={() => setProblemsOpen(true)}
+              sx={{
+                px: 1,
+                py: 0.5,
+                borderTop: 1,
+                borderColor: 'divider',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0.75,
+                cursor: 'pointer',
+                '&:hover': { bgcolor: 'action.hover' },
+              }}
+            >
+              <ErrorOutlineIcon sx={{ fontSize: 14, color: 'error.main' }} />
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ fontSize: '0.7rem', flex: 1, minWidth: 0 }}
+              >
+                {t('problems.count', { n: problemTotal })}
+              </Typography>
+            </Box>
+          )}
           <Box
             onClick={() => void handleOpenSettings()}
             sx={{
@@ -874,6 +917,16 @@ export default function BookDetail({
         onSelectChapter={(_bookPath, chapterId) => {
           selectChapter(chapterId)
           setSearchOpen(false)
+        }}
+      />
+
+      <ProblemsDialog
+        open={problemsOpen}
+        onClose={() => setProblemsOpen(false)}
+        bookPath={bookPath}
+        onOpenProblem={(_bookPath, chapterId) => {
+          if (chapterId) selectChapter(chapterId)
+          setProblemsOpen(false)
         }}
       />
 

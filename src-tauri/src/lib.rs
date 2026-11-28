@@ -1,5 +1,6 @@
 mod book_fs;
 mod commands;
+mod diagnostics;
 mod error;
 mod logger;
 mod models;
@@ -48,6 +49,8 @@ pub fn run() {
             git_ahead_behind,
             get_repo_state,
             get_file_diff,
+            scan_library_problems,
+            scan_book_problems,
             enable_version_control,
             get_book_identity,
             set_book_identity,
