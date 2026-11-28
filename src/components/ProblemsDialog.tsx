@@ -1,3 +1,4 @@
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import {
@@ -9,6 +10,9 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  IconButton,
+  Snackbar,
+  Tooltip,
   Typography,
 } from '@mui/material'
 import { useCallback, useEffect, useState } from 'react'
@@ -20,6 +24,28 @@ import {
   scanBookProblems,
   scanLibraryProblems,
 } from '../utils/commands'
+
+async function writeClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    // WKWebView 在少数情况下拒绝 Clipboard API，回退到选区复制
+  }
+  try {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(textarea)
+    return ok
+  } catch {
+    return false
+  }
+}
 
 interface ProblemsDialogProps {
   open: boolean
@@ -39,6 +65,7 @@ export default function ProblemsDialog({
   const [books, setBooks] = useState<BookProblems[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -99,8 +126,55 @@ export default function ProblemsDialog({
 
   const total = books.reduce((sum, book) => sum + book.problems.length, 0)
 
+  const levelText = (problem: Problem) =>
+    problem.severity === 'error'
+      ? t('problems.copy.levelError')
+      : t('problems.copy.levelWarning')
+
+  const problemLines = (problem: Problem): string[] => [
+    `${t('problems.copy.chapter')}: ${problem.chapter_title ?? '-'}`,
+    `${t('problems.copy.file')}: ${problem.file ?? '-'}`,
+    `${t('problems.copy.line')}: ${problem.line ?? '-'}`,
+    `${t('problems.copy.level')}: ${levelText(problem)}`,
+    `${t('problems.copy.type')}: ${problem.kind}`,
+    `${t('problems.copy.description')}: ${problemText(problem)}`,
+  ]
+
+  const singleReport = (book: BookProblems, problem: Problem): string =>
+    [
+      t('problems.copy.reportTitle'),
+      `${t('problems.copy.book')}: ${book.book_title}`,
+      `${t('problems.copy.bookPath')}: ${book.book_path}`,
+      ...problemLines(problem),
+    ].join('\n')
+
+  const allReport = (): string =>
+    [
+      t('problems.copy.reportTitle'),
+      t('problems.copy.reportSummary', {
+        books: books.length,
+        problems: total,
+      }),
+      ...books.flatMap(book => [
+        '',
+        `## ${book.book_title}`,
+        `${t('problems.copy.bookPath')}: ${book.book_path}`,
+        ...book.problems.flatMap((problem, index) => [
+          '',
+          `${index + 1}.`,
+          ...problemLines(problem).map(line => `   ${line}`),
+        ]),
+      ]),
+    ].join('\n')
+
+  const copyText = async (text: string) => {
+    const ok = await writeClipboard(text)
+    setToast(ok ? t('problems.copied') : t('problems.copyFailed'))
+  }
+
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+    <>
+      <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle sx={{ pb: 1 }}>
         {t('problems.title')}
         {!loading && total > 0 && (
@@ -169,61 +243,94 @@ export default function ProblemsDialog({
                 {book.problems.map((problem, index) => (
                   <Box
                     key={`${book.book_path}-${index}`}
-                    component="button"
-                    type="button"
-                    onClick={() =>
-                      onOpenProblem(book.book_path, problem.chapter_id)
-                    }
                     sx={{
                       display: 'flex',
                       alignItems: 'flex-start',
-                      gap: 1,
-                      width: '100%',
-                      textAlign: 'left',
-                      border: 0,
                       borderTop: '1px solid',
                       borderColor: 'divider',
-                      bgcolor: 'transparent',
-                      color: 'inherit',
-                      px: 1,
-                      py: 0.75,
-                      cursor: 'pointer',
-                      '&:hover': { bgcolor: 'action.hover' },
+                      '&:hover .problem-copy, &:focus-within .problem-copy': {
+                        opacity: 1,
+                      },
                     }}
                   >
-                    {problem.severity === 'error' ? (
-                      <ErrorOutlineIcon
-                        sx={{ fontSize: 16, color: 'error.main', mt: 0.2 }}
-                      />
-                    ) : (
-                      <WarningAmberIcon
-                        sx={{ fontSize: 16, color: 'warning.main', mt: 0.2 }}
-                      />
-                    )}
-                    <Box sx={{ flex: 1, minWidth: 0 }}>
-                      <Typography
-                        variant="body2"
-                        sx={{ fontSize: '0.8rem', wordBreak: 'break-word' }}
-                      >
-                        {problem.chapter_title
-                          ? `${problem.chapter_title} — ${problemText(problem)}`
-                          : problemText(problem)}
-                      </Typography>
-                      {(problem.file || problem.line) && (
-                        <Typography
-                          variant="caption"
-                          color="text.secondary"
-                          sx={{
-                            fontFamily: 'var(--font-family-mono)',
-                            fontSize: '0.66rem',
-                            wordBreak: 'break-all',
-                          }}
-                        >
-                          {problem.file}
-                          {problem.line ? `:${problem.line}` : ''}
-                        </Typography>
+                    <Box
+                      role="button"
+                      tabIndex={0}
+                      onClick={() =>
+                        onOpenProblem(book.book_path, problem.chapter_id)
+                      }
+                      onKeyDown={event => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          onOpenProblem(book.book_path, problem.chapter_id)
+                        }
+                      }}
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: 1,
+                        flex: 1,
+                        minWidth: 0,
+                        textAlign: 'left',
+                        color: 'inherit',
+                        px: 1,
+                        py: 0.75,
+                        cursor: 'pointer',
+                        '&:hover': { bgcolor: 'action.hover' },
+                      }}
+                    >
+                      {problem.severity === 'error' ? (
+                        <ErrorOutlineIcon
+                          sx={{ fontSize: 16, color: 'error.main', mt: 0.2 }}
+                        />
+                      ) : (
+                        <WarningAmberIcon
+                          sx={{ fontSize: 16, color: 'warning.main', mt: 0.2 }}
+                        />
                       )}
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Typography
+                          variant="body2"
+                          sx={{ fontSize: '0.8rem', wordBreak: 'break-word' }}
+                        >
+                          {problem.chapter_title
+                            ? `${problem.chapter_title} — ${problemText(problem)}`
+                            : problemText(problem)}
+                        </Typography>
+                        {(problem.file || problem.line) && (
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            sx={{
+                              fontFamily: 'var(--font-family-mono)',
+                              fontSize: '0.66rem',
+                              wordBreak: 'break-all',
+                            }}
+                          >
+                            {problem.file}
+                            {problem.line ? `:${problem.line}` : ''}
+                          </Typography>
+                        )}
+                      </Box>
                     </Box>
+                    <Tooltip title={t('problems.copyOne')} arrow>
+                      <IconButton
+                        className="problem-copy"
+                        size="small"
+                        aria-label={t('problems.copyOne')}
+                        onClick={() =>
+                          void copyText(singleReport(book, problem))
+                        }
+                        sx={{
+                          opacity: 0,
+                          transition: 'opacity 120ms',
+                          mr: 0.5,
+                          mt: 0.25,
+                        }}
+                      >
+                        <ContentCopyIcon sx={{ fontSize: 14 }} />
+                      </IconButton>
+                    </Tooltip>
                   </Box>
                 ))}
               </Box>
@@ -232,11 +339,28 @@ export default function ProblemsDialog({
         )}
       </DialogContent>
       <DialogActions>
+        <Button
+          size="small"
+          startIcon={<ContentCopyIcon sx={{ fontSize: 16 }} />}
+          onClick={() => void copyText(allReport())}
+          disabled={loading || total === 0}
+          sx={{ mr: 'auto' }}
+        >
+          {t('problems.copyAll')}
+        </Button>
         <Button onClick={() => void reload()} disabled={loading}>
           {t('problems.refresh')}
         </Button>
         <Button onClick={onClose}>{t('common.close')}</Button>
       </DialogActions>
-    </Dialog>
+      </Dialog>
+      <Snackbar
+        open={toast !== null}
+        autoHideDuration={2000}
+        onClose={() => setToast(null)}
+        message={toast}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      />
+    </>
   )
 }
