@@ -1,9 +1,8 @@
-import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
-import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 import HomeIcon from '@mui/icons-material/Home'
 import SearchIcon from '@mui/icons-material/Search'
 import SettingsIcon from '@mui/icons-material/Settings'
 import {
+  Alert,
   Box,
   Typography,
   IconButton,
@@ -13,6 +12,7 @@ import {
   DialogContent,
   DialogActions,
   Button,
+  Snackbar,
   TextField,
 } from '@mui/material'
 import { listen } from '@tauri-apps/api/event'
@@ -21,20 +21,25 @@ import { useTranslation } from 'react-i18next'
 
 import BookSettingsDialog from '../components/BookSettingsDialog'
 import ChapterEditor from '../components/ChapterEditor'
+import type { SaveStatus } from '../components/ChapterEditor'
 import ChapterTree from '../components/ChapterTree'
 import DiaryTimeline from '../components/DiaryTimeline'
 import SearchDialog from '../components/SearchDialog'
 import { useBook } from '../hooks/useBook'
-import type { BookInfo, Chapter } from '../types'
+import { useBookActivity } from '../hooks/useBookActivity'
+import { useRepoState } from '../hooks/useRepoState'
+import type { BookIdentity, BookInfo, Chapter } from '../types'
 import {
-  revealInFinder,
-  resolveConflict,
   attemptMerge,
-  readBookLogs,
   deleteBook,
+  enableVersionControl,
+  formatInvokeError,
+  getBookIdentity,
   renameBook,
+  resolveConflict,
+  revealInFinder,
+  setBookIdentity,
 } from '../utils/commands'
-import type { LogEntry } from '../utils/commands'
 
 interface BookDetailProps {
   bookInfo: BookInfo
@@ -64,7 +69,6 @@ export default function BookDetail({
     moveUp,
     moveDown,
     moveChapterTo,
-    gitStatusText,
     commit,
     autoCommit,
     getRemoteUrl,
@@ -72,11 +76,16 @@ export default function BookDetail({
     fetchRemote,
     pullRemote,
     pushRemote,
-    getAheadBehind,
-    getUserConfig,
-    refreshGitStatus,
     refreshMeta,
   } = useBook(bookPath)
+
+  const {
+    repoState,
+    loading: repoLoading,
+    error: repoError,
+    refresh: refreshRepoState,
+    scheduleRefresh,
+  } = useRepoState(bookPath)
 
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const [addParentId, setAddParentId] = useState<string | null>(null)
@@ -87,38 +96,99 @@ export default function BookDetail({
   const [syncingType, setSyncingType] = useState<string | null>(null)
   const [remoteUrlDraft, setRemoteUrlDraft] = useState('')
   const [syncOutput, setSyncOutput] = useState('')
-  const [gitName, setGitName] = useState('')
-  const [gitEmail, setGitEmail] = useState('')
   const [drawerWidth, setDrawerWidth] = useState(280)
   const resizingRef = useRef(false)
-  const [aheadBehind, setAheadBehind] = useState<[number, number] | null>(null)
   const [conflictedFiles, setConflictedFiles] = useState<string[]>([])
   const [resolvedFiles, setResolvedFiles] = useState<Set<string>>(new Set())
   const [mergeInProgress, setMergeInProgress] = useState(false)
-  const [logs, setLogs] = useState<LogEntry[]>([])
   const [localTitle, setLocalTitle] = useState(bookInfo.title)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [identity, setIdentity] = useState<BookIdentity | null>(null)
+  const [identityLoading, setIdentityLoading] = useState(false)
+  const [gitError, setGitError] = useState<string | null>(null)
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved')
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const saveRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingSaveRef = useRef<{ chapterId: string; content: string } | null>(
+    null,
+  )
 
-  const refreshLogs = useCallback(async () => {
+  const runAutoCommit = useCallback(
+    (message: string) => {
+      void autoCommit(message).catch((e) =>
+        setGitError(formatInvokeError(e)),
+      )
+    },
+    [autoCommit],
+  )
+
+  useEffect(() => {
+    if (repoError) setGitError(repoError)
+  }, [repoError])
+
+  const {
+    activity,
+    loading: activityLoading,
+    error: activityError,
+    refresh: refreshActivity,
+  } = useBookActivity(bookPath, commitDialogOpen)
+
+  const refreshIdentity = useCallback(async () => {
+    setIdentityLoading(true)
     try {
-      const entries = await readBookLogs(200, bookPath)
-      const reversed = entries.reverse()
-      setLogs(reversed)
-      return reversed
-    } catch {
-      return [] as LogEntry[]
+      setIdentity(await getBookIdentity(bookPath))
+    } catch (e) {
+      setIdentity(null)
+      setGitError(formatInvokeError(e))
+    } finally {
+      setIdentityLoading(false)
     }
   }, [bookPath])
 
-  const refreshAheadBehind = useCallback(async () => {
-    if (!bookPath) return
+  const handleOpenSettings = useCallback(async () => {
+    setCommitMessage('')
+    setSyncOutput('')
+    setCommitDialogOpen(true)
+    void refreshActivity()
+    const state = await refreshRepoState()
+    // 未初始化仓库时不再读取身份与远程，避免弹出无意义的错误
+    if (!state?.initialized) return
+    await refreshIdentity()
     try {
-      const ab = await getAheadBehind()
-      setAheadBehind(ab)
-    } catch {
-      setAheadBehind(null)
+      const url = await getRemoteUrl()
+      setRemoteUrlState(url || '')
+      setRemoteUrlDraft(url || '')
+    } catch (e) {
+      setGitError(formatInvokeError(e))
     }
-  }, [bookPath, getAheadBehind])
+  }, [
+    getRemoteUrl,
+    refreshRepoState,
+    refreshIdentity,
+    refreshActivity,
+    setGitError,
+  ])
+
+  const handleEnableRepo = useCallback(async () => {
+    setSyncOutput('')
+    try {
+      await enableVersionControl(bookPath)
+      await refreshRepoState()
+      await refreshIdentity()
+      void refreshActivity()
+    } catch (e) {
+      const message = formatInvokeError(e)
+      setSyncOutput(message)
+      setGitError(message)
+      throw e
+    }
+  }, [
+    bookPath,
+    refreshRepoState,
+    refreshIdentity,
+    refreshActivity,
+    setGitError,
+  ])
 
   // Select initial chapter from search result
   useEffect(() => {
@@ -135,7 +205,9 @@ export default function BookDetail({
     try {
       await attemptMerge(bookPath)
     } catch (e) {
-      setSyncOutput(String(e))
+      const message = formatInvokeError(e)
+      setSyncOutput(message)
+      setGitError(message)
       setMergeInProgress(false)
       setSyncingType(null)
     }
@@ -148,7 +220,9 @@ export default function BookDetail({
         await resolveConflict(bookPath, filePath, useTheirs)
         setResolvedFiles((prev) => new Set([...prev, filePath]))
       } catch (e) {
-        setSyncOutput(`Failed to resolve ${filePath}: ${e}`)
+        const message = formatInvokeError(e)
+        setSyncOutput(`Failed to resolve ${filePath}: ${message}`)
+        setGitError(message)
       }
     },
     [bookPath],
@@ -161,12 +235,14 @@ export default function BookDetail({
       setConflictedFiles([])
       setResolvedFiles(new Set())
       setSyncOutput('Merge committed.')
-      refreshGitStatus()
-      refreshAheadBehind()
+      await refreshRepoState()
+      void refreshActivity()
     } catch (e) {
-      setSyncOutput(String(e))
+      const message = formatInvokeError(e)
+      setSyncOutput(message)
+      setGitError(message)
     }
-  }, [bookPath, commit, refreshGitStatus, refreshAheadBehind])
+  }, [bookPath, commit, refreshRepoState, refreshActivity])
 
   const handleResizeStart = useCallback(
     (e: React.MouseEvent) => {
@@ -200,12 +276,12 @@ export default function BookDetail({
   useEffect(() => {
     const id = setInterval(
       () => {
-        autoCommit('auto-save')
+        runAutoCommit('auto-save')
       },
       10 * 60 * 1000,
     )
     return () => clearInterval(id)
-  }, [autoCommit])
+  }, [runAutoCommit])
 
   // Auto-commit on chapter switch
   const prevChapterRef = useRef(selectedChapterId)
@@ -214,15 +290,15 @@ export default function BookDetail({
       prevChapterRef.current &&
       prevChapterRef.current !== selectedChapterId
     ) {
-      autoCommit('auto-save before switch')
+      runAutoCommit('auto-save before switch')
     }
     prevChapterRef.current = selectedChapterId
-  }, [selectedChapterId, autoCommit])
+  }, [selectedChapterId, runAutoCommit])
 
   // Auto-commit on unmount (app close / back to shelf)
   useEffect(() => {
     return () => {
-      autoCommit('auto-save')
+      autoCommit('auto-save').catch(() => {})
     }
   }, [autoCommit])
 
@@ -244,17 +320,20 @@ export default function BookDetail({
             } else {
               setConflictedFiles([])
               setSyncOutput(msg)
-              refreshGitStatus()
-              refreshAheadBehind()
+              await refreshRepoState()
+              void refreshActivity()
             }
           } else {
             setSyncOutput(event.payload.message)
+            setGitError(event.payload.message)
           }
         } else {
           setSyncOutput(event.payload.message)
           if (event.payload.ok) {
-            refreshGitStatus()
-            refreshAheadBehind()
+            await refreshRepoState()
+            void refreshActivity()
+          } else {
+            setGitError(event.payload.message)
           }
         }
       },
@@ -262,12 +341,7 @@ export default function BookDetail({
     return () => {
       unlisten.then((fn) => fn())
     }
-  }, [refreshGitStatus, refreshAheadBehind])
-
-  // Refresh ahead/behind on mount
-  useEffect(() => {
-    refreshAheadBehind()
-  }, [refreshAheadBehind])
+  }, [refreshRepoState, refreshActivity])
 
   const selectedChapter = useMemo(() => {
     if (!meta || !selectedChapterId) return null
@@ -310,7 +384,7 @@ export default function BookDetail({
         const chapter = await createDiaryEntry(date)
         await selectChapter(chapter.id)
       } catch (e) {
-        console.error('Failed to create diary entry:', e)
+        setGitError(formatInvokeError(e))
       }
     },
     [selectChapter, createDiaryEntry],
@@ -346,28 +420,80 @@ export default function BookDetail({
       setAddTitle('')
       selectChapter(chapter.id)
     } catch (e) {
-      console.error('Failed to create chapter:', e)
+      setGitError(formatInvokeError(e))
     }
   }
 
-  const handleSaveContent = useCallback(
-    async (markdown: string) => {
-      if (!selectedChapterId) return
+  const clearSaveRetry = useCallback(() => {
+    if (saveRetryRef.current) {
+      clearTimeout(saveRetryRef.current)
+      saveRetryRef.current = null
+    }
+  }, [])
+
+  useEffect(
+    () => () => {
+      if (saveRetryRef.current) clearTimeout(saveRetryRef.current)
+    },
+    [],
+  )
+
+  const persistChapter = useCallback(
+    async function persist(
+      chapterId: string,
+      markdown: string,
+      attempt = 0,
+    ): Promise<void> {
+      setSaveStatus('saving')
+      setSaveError(null)
       try {
-        await saveChapter(selectedChapterId, markdown)
+        await saveChapter(chapterId, markdown)
+        pendingSaveRef.current = null
+        setSaveStatus('saved')
+        scheduleRefresh()
       } catch (e) {
-        console.error('Failed to save chapter:', e)
+        const message = formatInvokeError(e)
+        setSaveStatus('error')
+        setSaveError(message)
+        pendingSaveRef.current = { chapterId, content: markdown }
+        if (attempt < 2) {
+          clearSaveRetry()
+          saveRetryRef.current = setTimeout(() => {
+            void persist(chapterId, markdown, attempt + 1)
+          }, 2000)
+        }
       }
     },
-    [selectedChapterId, saveChapter],
+    [saveChapter, scheduleRefresh, clearSaveRetry],
   )
+
+  const handleSaveContent = useCallback(
+    (markdown: string) => {
+      if (!selectedChapterId) return
+      clearSaveRetry()
+      void persistChapter(selectedChapterId, markdown)
+    },
+    [selectedChapterId, persistChapter, clearSaveRetry],
+  )
+
+  const handleEditorDirty = useCallback(() => {
+    setSaveStatus((current) => (current === 'saving' ? current : 'dirty'))
+    setSaveError(null)
+  }, [])
+
+  const handleRetrySave = useCallback(() => {
+    const pending = pendingSaveRef.current
+    if (!pending) return
+    clearSaveRetry()
+    void persistChapter(pending.chapterId, pending.content)
+  }, [persistChapter, clearSaveRetry])
 
   const handleDeleteChapter = useCallback(
     async (id: string) => {
       try {
         await removeChapter(id)
       } catch (e) {
-        console.error('Failed to delete chapter:', e)
+        setGitError(formatInvokeError(e))
       }
     },
     [removeChapter],
@@ -378,7 +504,7 @@ export default function BookDetail({
       try {
         await renameChapterById(id, title)
       } catch (e) {
-        console.error('Failed to rename chapter:', e)
+        setGitError(formatInvokeError(e))
       }
     },
     [renameChapterById],
@@ -388,12 +514,13 @@ export default function BookDetail({
     if (!commitMessage.trim()) return
     try {
       await commit(commitMessage.trim())
-      setCommitDialogOpen(false)
       setCommitMessage('')
+      await refreshRepoState()
+      void refreshActivity()
     } catch (e) {
-      console.error('Failed to commit:', e)
+      setGitError(formatInvokeError(e))
     }
-  }, [commitMessage, commit])
+  }, [commitMessage, commit, refreshRepoState, refreshActivity])
 
   const handleMoveChapter = useCallback(
     async (
@@ -401,20 +528,94 @@ export default function BookDetail({
       targetId: string | null,
       position: 'inner' | 'before' | 'after',
     ) => {
-      console.log('[BookDetail] handleMoveChapter:', {
-        chapterId,
-        targetId,
-        position,
-      })
       try {
         await moveChapterTo(chapterId, targetId, position)
-        console.log('[BookDetail] moveChapterTo succeeded')
       } catch (e) {
-        console.error('[BookDetail] moveChapterTo failed:', e)
+        setGitError(formatInvokeError(e))
       }
     },
     [moveChapterTo],
   )
+
+  const handleSaveIdentity = useCallback(
+    async (name: string, email: string) => {
+      try {
+        await setBookIdentity(bookPath, name, email)
+        await refreshIdentity()
+        await refreshRepoState()
+        void refreshActivity()
+      } catch (e) {
+        const message = formatInvokeError(e)
+        setGitError(message)
+        throw e
+      }
+    },
+    [bookPath, refreshIdentity, refreshRepoState, refreshActivity],
+  )
+
+  const handleSetRemoteUrl = useCallback(async () => {
+    try {
+      await setRemoteUrlApi(remoteUrlDraft)
+      setRemoteUrlState(remoteUrlDraft)
+      await refreshRepoState()
+      setSyncOutput(t('bookSettings.remoteSaved'))
+    } catch (e) {
+      const message = formatInvokeError(e)
+      setSyncOutput(message)
+      setGitError(message)
+      throw e
+    }
+  }, [setRemoteUrlApi, remoteUrlDraft, refreshRepoState, t])
+
+  const runSync = useCallback(
+    async (type: 'fetch' | 'pull' | 'push', action: () => Promise<string>) => {
+      setSyncingType(type)
+      setSyncOutput('')
+      try {
+        await action()
+      } catch (e) {
+        const message = formatInvokeError(e)
+        setSyncingType(null)
+        setSyncOutput(message)
+        setGitError(message)
+      }
+    },
+    [],
+  )
+
+  const repoSummary = useMemo(() => {
+    if (!repoState) return ''
+    if (!repoState.initialized) return t('repo.noRepo')
+    const parts: string[] = []
+    parts.push(
+      repoState.detached
+        ? t('repo.detached')
+        : repoState.branch || t('repo.unborn'),
+    )
+    if (repoState.remote_url) {
+      if (repoState.ahead > 0) parts.push(`↑${repoState.ahead}`)
+      if (repoState.behind > 0) parts.push(`↓${repoState.behind}`)
+      if (repoState.ahead === 0 && repoState.behind === 0) {
+        parts.push(t('repo.synced'))
+      }
+    } else {
+      parts.push(t('repo.noRemote'))
+    }
+    if (repoState.dirty.length > 0) {
+      parts.push(t('repo.uncommitted', { n: repoState.dirty.length }))
+    }
+    return parts.join(' · ')
+  }, [repoState, t])
+
+  const repoDotColor = !repoState?.initialized
+    ? 'text.disabled'
+    : repoState.conflicted.length > 0
+      ? 'error.main'
+      : repoState.dirty.length > 0
+        ? 'warning.main'
+        : repoState.remote_url
+          ? 'success.main'
+          : 'info.main'
 
   return (
     <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
@@ -487,17 +688,7 @@ export default function BookDetail({
               ))}
           </Box>
           <Box
-            onClick={async () => {
-              setCommitMessage('')
-              setSyncOutput('')
-              const url = await getRemoteUrl()
-              setRemoteUrlState(url || '')
-              setRemoteUrlDraft(url || '')
-              const [name, email] = await getUserConfig()
-              setGitName(name)
-              setGitEmail(email)
-              setCommitDialogOpen(true)
-            }}
+            onClick={() => void handleOpenSettings()}
             sx={{
               p: 1,
               borderTop: 1,
@@ -515,55 +706,16 @@ export default function BookDetail({
                 height: 7,
                 borderRadius: '50%',
                 flexShrink: 0,
-                bgcolor: gitStatusText ? 'warning.main' : 'success.main',
+                bgcolor: repoDotColor,
               }}
             />
             <Typography
               variant="caption"
               color="text.secondary"
-              sx={{
-                fontSize: '0.7rem',
-                flex: 1,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 0.5,
-              }}
+              noWrap
+              sx={{ fontSize: '0.7rem', flex: 1, minWidth: 0 }}
             >
-              {aheadBehind != null && aheadBehind[0] > 0 && (
-                <Box
-                  component="span"
-                  sx={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 0.2,
-                    color: 'warning.main',
-                  }}
-                >
-                  <ArrowUpwardIcon sx={{ fontSize: 12 }} />
-                  {aheadBehind[0]}
-                </Box>
-              )}
-              {aheadBehind != null && aheadBehind[1] > 0 && (
-                <Box
-                  component="span"
-                  sx={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 0.2,
-                    color: 'info.main',
-                  }}
-                >
-                  <ArrowDownwardIcon sx={{ fontSize: 12 }} />
-                  {aheadBehind[1]}
-                </Box>
-              )}
-              {!gitStatusText &&
-              aheadBehind?.[0] === 0 &&
-              aheadBehind?.[1] === 0
-                ? 'synced'
-                : gitStatusText
-                  ? 'dirty'
-                  : ''}
+              {repoSummary || t('repo.loading')}
             </Typography>
             <SettingsIcon
               sx={{ fontSize: 16, color: 'text.secondary', opacity: 0.6 }}
@@ -603,6 +755,13 @@ export default function BookDetail({
             bookPath={bookPath}
             content={chapterContent}
             onContentChange={handleSaveContent}
+            saveStatus={saveStatus}
+            saveError={saveError}
+            onDirty={handleEditorDirty}
+            onRetrySave={handleRetrySave}
+            onReloadContent={() => {
+              void selectChapter(selectedChapter.id)
+            }}
           />
         ) : (
           <Box
@@ -641,7 +800,9 @@ export default function BookDetail({
           onBack()
         }}
         onRevealInFinder={() => revealInFinder(bookPath)}
-        gitStatusText={gitStatusText}
+        repoState={repoState}
+        repoLoading={repoLoading}
+        onEnableRepo={handleEnableRepo}
         commitMessage={commitMessage}
         setCommitMessage={setCommitMessage}
         onCommit={handleCommit}
@@ -653,35 +814,25 @@ export default function BookDetail({
           setRemoteUrlState(url || '')
           setRemoteUrlDraft(url || '')
         }}
-        onSetRemoteUrl={async () => {
-          await setRemoteUrlApi(remoteUrlDraft)
-          setRemoteUrlState(remoteUrlDraft)
-        }}
-        onFetch={async () => {
-          setSyncingType('fetch')
-          setSyncOutput('')
-          await fetchRemote()
-        }}
-        onPull={async () => {
-          setSyncingType('pull')
-          setSyncOutput('')
-          await pullRemote()
-        }}
-        onPush={async () => {
-          setSyncingType('push')
-          setSyncOutput('')
-          await pushRemote()
-        }}
+        onSetRemoteUrl={handleSetRemoteUrl}
+        onFetch={() => runSync('fetch', fetchRemote)}
+        onPull={() => runSync('pull', pullRemote)}
+        onPush={() => runSync('push', pushRemote)}
         onMerge={handleAttemptMerge}
         syncingType={syncingType}
         mergeInProgress={mergeInProgress}
-        aheadBehind={aheadBehind}
         conflictedFiles={conflictedFiles}
         resolvedFiles={resolvedFiles}
         onResolveFile={handleResolveFile}
         onCommitMerge={handleCommitMerge}
-        logs={logs}
-        onRefreshLogs={refreshLogs}
+        syncOutput={syncOutput}
+        identity={identity}
+        identityLoading={identityLoading}
+        onSaveIdentity={handleSaveIdentity}
+        activity={activity}
+        activityLoading={activityLoading}
+        activityError={activityError}
+        onRefreshActivity={refreshActivity}
       />
 
       <Dialog
@@ -725,6 +876,21 @@ export default function BookDetail({
           setSearchOpen(false)
         }}
       />
+
+      <Snackbar
+        open={!!gitError}
+        autoHideDuration={6000}
+        onClose={() => setGitError(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          severity="error"
+          variant="filled"
+          onClose={() => setGitError(null)}
+        >
+          {gitError}
+        </Alert>
+      </Snackbar>
     </Box>
   )
 }

@@ -68,6 +68,24 @@ export function formatDiaryEntryLabel(key: string, title?: string): string {
 }
 
 /**
+ * 相对时间：刚刚 / N 分钟前 / N 小时前 / N 天前；更久则退回短日期。
+ * 兼容秒级与毫秒级时间戳。
+ */
+export function formatRelativeTime(ts: number): string {
+  const ms = ts < 1e12 ? ts * 1000 : ts
+  if (!ms || ms <= 0) return ''
+  const diff = Date.now() - ms
+  if (diff < 60_000) return i18next.t('date.justNow')
+  const minutes = Math.floor(diff / 60_000)
+  if (minutes < 60) return i18next.t('date.minutesAgo', { n: minutes })
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return i18next.t('date.hoursAgo', { n: hours })
+  const days = Math.floor(hours / 24)
+  if (days < 30) return i18next.t('date.daysAgo', { n: days })
+  return formatBookDate(ts)
+}
+
+/**
  * 按当前界面语言格式化书籍更新时间：今天 / 昨天 / 短日期（当年省略年份）。
  * 兼容秒级与毫秒级时间戳（< 1e12 视为秒）。
  */

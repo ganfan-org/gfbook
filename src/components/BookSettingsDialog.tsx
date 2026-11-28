@@ -1,25 +1,36 @@
-import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
-import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'
 import {
+  Alert,
   Box,
   Button,
+  Chip,
   CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
   Divider,
+  MenuItem,
+  Select,
   Tab,
   Tabs,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography,
 } from '@mui/material'
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import type { LogEntry } from '../utils/commands'
-import { formatBookDate } from '../utils/date'
+import type {
+  ActivityCategory,
+  ActivityItem,
+  BookIdentity,
+  RepoState,
+} from '../types'
+import { formatInvokeError } from '../utils/commands'
+import { formatBookDate, formatRelativeTime } from '../utils/date'
 
 interface BookSettingsDialogProps {
   open: boolean
@@ -30,32 +41,84 @@ interface BookSettingsDialogProps {
   onRename: (title: string) => Promise<void>
   onDelete: () => Promise<void>
   onRevealInFinder: () => void
-  // Git tab
-  gitStatusText?: string
-  gitLoading?: boolean
-  commitMessage?: string
-  setCommitMessage?: (s: string) => void
-  onCommit?: () => Promise<void>
-  remoteUrl?: string | null
-  remoteDraft?: string
-  onRemoteDraftChange?: (s: string) => void
-  onLoadRemote?: () => Promise<void>
-  onSetRemoteUrl?: () => Promise<void>
-  onFetch?: () => Promise<void>
-  onPull?: () => Promise<void>
-  onPush?: () => Promise<void>
-  onMerge?: () => Promise<void>
-  syncingType?: string | null
-  mergeInProgress?: boolean
-  aheadBehind?: [number, number] | null
-  conflictedFiles?: string[]
-  resolvedFiles?: Set<string>
-  onResolveFile?: (file: string, useTheirs: boolean) => Promise<void>
-  onCommitMerge?: () => Promise<void>
-  // Log tab
-  logs?: LogEntry[]
-  onRefreshLogs?: () => Promise<LogEntry[]>
-  tabs?: ('info' | 'git' | 'log')[]
+  // 版本 / 仓库
+  repoState: RepoState | null
+  repoLoading: boolean
+  onEnableRepo: () => Promise<void>
+  commitMessage: string
+  setCommitMessage: (s: string) => void
+  onCommit: () => Promise<void>
+  remoteUrl: string | null
+  remoteDraft: string
+  onRemoteDraftChange: (s: string) => void
+  onLoadRemote: () => Promise<void>
+  onSetRemoteUrl: () => Promise<void>
+  onFetch: () => Promise<void>
+  onPull: () => Promise<void>
+  onPush: () => Promise<void>
+  onMerge: () => Promise<void>
+  syncingType: string | null
+  mergeInProgress: boolean
+  conflictedFiles: string[]
+  resolvedFiles: Set<string>
+  onResolveFile: (file: string, useTheirs: boolean) => Promise<void>
+  onCommitMerge: () => Promise<void>
+  syncOutput: string
+  // 提交身份
+  identity: BookIdentity | null
+  identityLoading: boolean
+  onSaveIdentity: (name: string, email: string) => Promise<void>
+  // 操作记录
+  activity: ActivityItem[]
+  activityLoading: boolean
+  activityError: string | null
+  onRefreshActivity: () => Promise<void>
+}
+
+type TabKey = 'info' | 'version' | 'activity'
+
+/** 按事件名归类，供记录页筛选 */
+function eventCategory(event: string): ActivityCategory {
+  const name = event.toLowerCase()
+  if (name.includes('image')) return 'image'
+  if (name === 'commit' || name.includes('merge')) return 'commit'
+  if (name.includes('chapter') || name.includes('diary')) return 'chapter'
+  if (
+    name.startsWith('set_') ||
+    ['fetch', 'pull', 'push', 'remote'].some((key) => name.includes(key))
+  ) {
+    return 'git'
+  }
+  return 'other'
+}
+
+function activityCategory(item: ActivityItem): ActivityCategory {
+  return item.kind === 'commit' ? 'commit' : eventCategory(item.event)
+}
+
+function isFailed(item: ActivityItem): boolean {
+  if (item.kind !== 'event') return false
+  return item.result === 'error' || item.result === 'failed'
+}
+
+function SummaryRow({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, py: 0.35 }}>
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={{ minWidth: 72, flexShrink: 0 }}
+      >
+        {label}
+      </Typography>
+      <Typography
+        variant="body2"
+        sx={{ fontSize: '0.78rem', wordBreak: 'break-word', minWidth: 0 }}
+      >
+        {value}
+      </Typography>
+    </Box>
+  )
 }
 
 export default function BookSettingsDialog({
@@ -67,60 +130,173 @@ export default function BookSettingsDialog({
   onRename,
   onDelete,
   onRevealInFinder,
-  gitStatusText = '',
-  gitLoading = false,
-  commitMessage = '',
-  setCommitMessage = () => {},
-  onCommit = async () => {},
-  remoteUrl = null,
-  remoteDraft = '',
-  onRemoteDraftChange = () => {},
-  onLoadRemote = async () => {},
-  onSetRemoteUrl = async () => {},
-  onFetch = async () => {},
-  onPull = async () => {},
-  onPush = async () => {},
-  onMerge = async () => {},
-  syncingType = null,
-  mergeInProgress = false,
-  aheadBehind = null,
-  conflictedFiles = [],
-  resolvedFiles = new Set(),
-  onResolveFile = async () => {},
-  onCommitMerge = async () => {},
-  logs = [],
-  onRefreshLogs = async () => [],
-  tabs = ['info', 'git', 'log'],
+  repoState,
+  repoLoading,
+  onEnableRepo,
+  commitMessage,
+  setCommitMessage,
+  onCommit,
+  remoteUrl,
+  remoteDraft,
+  onRemoteDraftChange,
+  onLoadRemote,
+  onSetRemoteUrl,
+  onFetch,
+  onPull,
+  onPush,
+  onMerge,
+  syncingType,
+  mergeInProgress,
+  conflictedFiles,
+  resolvedFiles,
+  onResolveFile,
+  onCommitMerge,
+  syncOutput,
+  identity,
+  identityLoading,
+  onSaveIdentity,
+  activity,
+  activityLoading,
+  activityError,
+  onRefreshActivity,
 }: BookSettingsDialogProps) {
   const { t } = useTranslation()
-  const [tab, setTab] = useState(tabs[0])
+  const [tab, setTab] = useState<TabKey>('info')
   const [renameValue, setRenameValue] = useState(bookTitle)
-  const [dialogLogs, setDialogLogs] = useState<LogEntry[]>(logs)
+  const [identityMode, setIdentityMode] = useState<'global' | 'book'>('global')
+  const [identityName, setIdentityName] = useState('')
+  const [identityEmail, setIdentityEmail] = useState('')
+  const [identitySaving, setIdentitySaving] = useState(false)
+  const [identityError, setIdentityError] = useState<string | null>(null)
+  const [activityFilter, setActivityFilter] = useState<'all' | ActivityCategory>(
+    'all',
+  )
+  const activityRequestedRef = useRef(false)
+  const [enablingRepo, setEnablingRepo] = useState(false)
+  const [enableError, setEnableError] = useState<string | null>(null)
+  const [enableDone, setEnableDone] = useState(false)
 
-  const displayLogs = logs.length > 0 ? logs : dialogLogs
+  // 弹窗重新打开时同步书名草稿
+  useEffect(() => {
+    if (!open) return
+    setRenameValue(bookTitle)
+    setEnableError(null)
+    setEnableDone(false)
+  }, [open, bookTitle])
+
+  // 身份数据刷新后回填表单
+  useEffect(() => {
+    if (!identity) return
+    setIdentityMode(identity.source === 'book' ? 'book' : 'global')
+    setIdentityName(identity.local_name ?? identity.effective_name ?? '')
+    setIdentityEmail(identity.local_email ?? identity.effective_email ?? '')
+    setIdentityError(null)
+  }, [identity])
+
+  // 记录页进入即加载：每次打开弹窗只自动请求一次
+  useEffect(() => {
+    if (!open) {
+      activityRequestedRef.current = false
+      return
+    }
+    if (tab !== 'activity' || activityRequestedRef.current) return
+    activityRequestedRef.current = true
+    if (activity.length === 0 && !activityLoading) {
+      void onRefreshActivity()
+    }
+  }, [
+    open,
+    tab,
+    activity.length,
+    activityLoading,
+    onRefreshActivity,
+  ])
 
   const handleRename = async () => {
     if (!renameValue.trim() || renameValue.trim() === bookTitle) return
     await onRename(renameValue.trim())
   }
 
+  const handleEnableRepo = async () => {
+    setEnablingRepo(true)
+    setEnableError(null)
+    setEnableDone(false)
+    try {
+      await onEnableRepo()
+      setEnableDone(true)
+    } catch (e) {
+      setEnableError(formatInvokeError(e))
+    } finally {
+      setEnablingRepo(false)
+    }
+  }
+
+  const handleIdentityModeChange = async (
+    _: unknown,
+    mode: 'global' | 'book' | null,
+  ) => {
+    if (!mode) return
+    setIdentityMode(mode)
+    setIdentityError(null)
+    if (mode === 'global' && identity?.source === 'book') {
+      setIdentitySaving(true)
+      try {
+        await onSaveIdentity('', '')
+      } catch {
+        setIdentityError(t('bookSettings.identitySaveFailed'))
+      } finally {
+        setIdentitySaving(false)
+      }
+    }
+  }
+
+  const handleSaveIdentity = async () => {
+    if (!identityName.trim() || !identityEmail.trim()) return
+    setIdentitySaving(true)
+    setIdentityError(null)
+    try {
+      await onSaveIdentity(identityName.trim(), identityEmail.trim())
+    } catch {
+      setIdentityError(t('bookSettings.identitySaveFailed'))
+    } finally {
+      setIdentitySaving(false)
+    }
+  }
+
+  const identityValue =
+    identity?.effective_name && identity?.effective_email
+      ? `${identity.effective_name} <${identity.effective_email}>`
+      : identity?.effective_name ||
+        identity?.effective_email ||
+        t('bookSettings.identityNone')
+
+  const identitySourceLabel =
+    identity?.source === 'book'
+      ? t('bookSettings.identitySourceBook')
+      : identity?.source === 'global'
+        ? t('bookSettings.identitySourceGlobal')
+        : t('bookSettings.identitySourceNone')
+
+  const filteredActivity = useMemo(() => {
+    if (activityFilter === 'all') return activity
+    return activity.filter((item) => activityCategory(item) === activityFilter)
+  }, [activity, activityFilter])
+
+  const conflictsUnresolved =
+    conflictedFiles.length > 0 &&
+    conflictedFiles.some((file) => !resolvedFiles.has(file))
+
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle sx={{ pb: 0 }}>{t('bookSettings.title')}</DialogTitle>
       <Tabs
         value={tab}
-        onChange={(_, v) => setTab(v)}
+        onChange={(_, value) => setTab(value)}
         sx={{ px: 2, borderBottom: 1, borderColor: 'divider' }}
       >
-        {tabs.includes('info') && (
-          <Tab label={t('bookSettings.tabInfo')} value="info" />
-        )}
-        {tabs.includes('git') && (
-          <Tab label={t('bookSettings.tabGit')} value="git" />
-        )}
-        {tabs.includes('log') && (
-          <Tab label={t('bookSettings.tabLog')} value="log" />
-        )}
+        <Tab label={t('bookSettings.tabInfo')} value="info" />
+        <Tab label={t('bookSettings.tabVersion')} value="version" />
+        <Tab label={t('bookSettings.tabActivity')} value="activity" />
       </Tabs>
       <DialogContent sx={{ pt: 2 }}>
         {tab === 'info' && (
@@ -204,9 +380,9 @@ export default function BookSettingsDialog({
           </Box>
         )}
 
-        {tab === 'git' && (
+        {tab === 'version' && (
           <Box>
-            {gitLoading ? (
+            {repoLoading && !repoState ? (
               <Box
                 sx={{
                   display: 'flex',
@@ -221,60 +397,307 @@ export default function BookSettingsDialog({
                   {t('bookSettings.loadingGit')}
                 </Typography>
               </Box>
+            ) : !repoState?.initialized ? (
+              <Box>
+                <Alert severity="info" sx={{ mb: 1 }}>
+                  {t('bookSettings.noRepo')}
+                </Alert>
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ mb: 2 }}
+                >
+                  {t('bookSettings.noRepoHint')}
+                </Typography>
+                <Box
+                  sx={{ display: 'flex', alignItems: 'center', gap: 1 }}
+                >
+                  <Button
+                    variant="contained"
+                    size="small"
+                    disabled={enablingRepo}
+                    onClick={handleEnableRepo}
+                  >
+                    {enablingRepo
+                      ? t('bookSettings.enablingRepo')
+                      : t('bookSettings.enableRepo')}
+                  </Button>
+                  {enablingRepo && <CircularProgress size={16} />}
+                </Box>
+                {enableError && (
+                  <Alert severity="error" sx={{ mt: 2 }}>
+                    {t('bookSettings.enableRepoFailed')}: {enableError}
+                  </Alert>
+                )}
+              </Box>
             ) : (
               <>
-                <Box display="flex" gap={1}>
-                  {aheadBehind != null && aheadBehind[0] > 0 && (
-                    <Box
-                      component="span"
-                      sx={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 0.2,
-                        color: 'warning.main',
-                        fontSize: '0.75rem',
-                      }}
-                    >
-                      <ArrowUpwardIcon sx={{ fontSize: 12 }} />
-                      {aheadBehind[0]}
-                    </Box>
-                  )}
-                  {aheadBehind != null && aheadBehind[1] > 0 && (
-                    <Box
-                      component="span"
-                      sx={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 0.2,
-                        color: 'info.main',
-                        fontSize: '0.75rem',
-                      }}
-                    >
-                      <ArrowDownwardIcon sx={{ fontSize: 12 }} />
-                      {aheadBehind[1]}
-                    </Box>
-                  )}
+                {enableDone && (
+                  <Alert severity="success" sx={{ mb: 2 }}>
+                    {t('bookSettings.enableRepoDone')}
+                  </Alert>
+                )}
+                <Typography variant="subtitle2" gutterBottom>
+                  {t('bookSettings.syncSummary')}
+                </Typography>
+                <Box
+                  sx={{
+                    border: 1,
+                    borderColor: 'divider',
+                    borderRadius: 1,
+                    px: 1.5,
+                    py: 1,
+                    mb: 2,
+                  }}
+                >
+                  <SummaryRow
+                    label={t('bookSettings.branch')}
+                    value={
+                      repoState.detached
+                        ? t('repo.detached')
+                        : repoState.branch || t('repo.unborn')
+                    }
+                  />
+                  <SummaryRow
+                    label={t('bookSettings.remote')}
+                    value={repoState.remote_url || t('repo.noRemote')}
+                  />
+                  <SummaryRow
+                    label={t('bookSettings.aheadBehind')}
+                    value={`↑${repoState.ahead} ↓${repoState.behind}`}
+                  />
+                  <SummaryRow
+                    label={t('bookSettings.uncommitted')}
+                    value={t('repo.uncommitted', {
+                      n: repoState.dirty.length,
+                    })}
+                  />
+                  <SummaryRow
+                    label={t('bookSettings.lastSync')}
+                    value={
+                      repoState.last_sync_at
+                        ? formatRelativeTime(repoState.last_sync_at)
+                        : t('bookSettings.neverSynced')
+                    }
+                  />
                 </Box>
 
-                <Divider sx={{ my: 1.5 }} />
+                <Typography variant="subtitle2" gutterBottom>
+                  {t('bookSettings.commitIdentity')}
+                </Typography>
+                {identityLoading && !identity ? (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <CircularProgress size={14} />
+                    <Typography variant="caption" color="text.secondary">
+                      {t('common.loading')}
+                    </Typography>
+                  </Box>
+                ) : (
+                  <Box sx={{ mb: 2 }}>
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        fontFamily: 'var(--font-family-mono)',
+                        fontSize: '0.72rem',
+                        wordBreak: 'break-all',
+                      }}
+                    >
+                      {identityValue}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {identitySourceLabel}
+                    </Typography>
+                    <ToggleButtonGroup
+                      size="small"
+                      exclusive
+                      value={identityMode}
+                      onChange={handleIdentityModeChange}
+                      sx={{ display: 'flex', mt: 1, mb: 1 }}
+                    >
+                      <ToggleButton
+                        value="global"
+                        sx={{ flex: 1, py: 0.2, fontSize: '0.72rem' }}
+                      >
+                        {t('bookSettings.identityFollowGlobal')}
+                      </ToggleButton>
+                      <ToggleButton
+                        value="book"
+                        sx={{ flex: 1, py: 0.2, fontSize: '0.72rem' }}
+                      >
+                        {t('bookSettings.identityCustom')}
+                      </ToggleButton>
+                    </ToggleButtonGroup>
+                    {identityMode === 'book' && (
+                      <>
+                        <Box display="flex" gap={1}>
+                          <TextField
+                            size="small"
+                            fullWidth
+                            label={t('bookSettings.identityName')}
+                            value={identityName}
+                            onChange={(e) => setIdentityName(e.target.value)}
+                          />
+                          <TextField
+                            size="small"
+                            fullWidth
+                            label={t('bookSettings.identityEmail')}
+                            value={identityEmail}
+                            onChange={(e) => setIdentityEmail(e.target.value)}
+                          />
+                        </Box>
+                        {identityError && (
+                          <Typography
+                            variant="caption"
+                            color="error"
+                            display="block"
+                            mt={0.5}
+                          >
+                            {identityError}
+                          </Typography>
+                        )}
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          sx={{ mt: 1 }}
+                          disabled={
+                            identitySaving ||
+                            !identityName.trim() ||
+                            !identityEmail.trim()
+                          }
+                          onClick={handleSaveIdentity}
+                        >
+                          {identitySaving
+                            ? t('common.loading')
+                            : t('bookSettings.identitySave')}
+                        </Button>
+                      </>
+                    )}
+                  </Box>
+                )}
+
+                <Typography variant="subtitle2" gutterBottom>
+                  {t('bookSettings.recentCommits')}
+                </Typography>
+                {repoState.recent_commits.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary" mb={2}>
+                    {t('bookSettings.noCommits')}
+                  </Typography>
+                ) : (
+                  <Box
+                    sx={{
+                      maxHeight: 160,
+                      overflow: 'auto',
+                      mb: 2,
+                      border: 1,
+                      borderColor: 'divider',
+                      borderRadius: 1,
+                    }}
+                  >
+                    {repoState.recent_commits.map((commit) => (
+                      <Box
+                        key={commit.hash}
+                        sx={{
+                          px: 1,
+                          py: 0.6,
+                          borderBottom: '1px solid',
+                          borderColor: 'divider',
+                          '&:last-of-type': { borderBottom: 0 },
+                        }}
+                      >
+                        <Box
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'baseline',
+                            gap: 0.75,
+                          }}
+                        >
+                          <Chip
+                            label={commit.short_hash}
+                            size="small"
+                            sx={{
+                              height: 18,
+                              fontSize: '0.65rem',
+                              fontFamily: 'var(--font-family-mono)',
+                            }}
+                          />
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              fontSize: '0.76rem',
+                              flex: 1,
+                              minWidth: 0,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {commit.message}
+                          </Typography>
+                        </Box>
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          sx={{ fontSize: '0.66rem', display: 'block' }}
+                        >
+                          {commit.author} · {commit.email} ·{' '}
+                          {formatRelativeTime(commit.timestamp)}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                )}
+
+                <Divider sx={{ my: 2 }} />
 
                 <Typography variant="subtitle2" gutterBottom>
                   {t('bookSettings.changes')}
                 </Typography>
-                <Typography
-                  variant="body2"
-                  color="text.secondary"
-                  mb={1}
-                  sx={{
-                    fontFamily: 'var(--font-family-mono)',
-                    fontSize: '0.75rem',
-                    whiteSpace: 'pre-wrap',
-                  }}
-                >
-                  {gitStatusText || t('bookSettings.noChanges')}
-                </Typography>
+                {repoState.dirty.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary" mb={1}>
+                    {t('bookSettings.noChanges')}
+                  </Typography>
+                ) : (
+                  <Box
+                    sx={{
+                      maxHeight: 140,
+                      overflow: 'auto',
+                      mb: 1,
+                      border: 1,
+                      borderColor: 'divider',
+                      borderRadius: 1,
+                      px: 1,
+                      py: 0.5,
+                    }}
+                  >
+                    {repoState.dirty.map((entry) => (
+                      <Box
+                        key={`${entry.path}-${entry.code}`}
+                        sx={{
+                          display: 'flex',
+                          gap: 1,
+                          py: 0.15,
+                          fontFamily: 'var(--font-family-mono)',
+                          fontSize: '0.7rem',
+                        }}
+                      >
+                        <Box
+                          component="span"
+                          sx={{ color: 'warning.main', flexShrink: 0 }}
+                        >
+                          {entry.code}
+                        </Box>
+                        <Box
+                          component="span"
+                          sx={{ wordBreak: 'break-all', minWidth: 0 }}
+                        >
+                          {entry.path}
+                        </Box>
+                      </Box>
+                    ))}
+                  </Box>
+                )}
 
-                {gitStatusText && (
+                {repoState.dirty.length > 0 && (
                   <>
                     <TextField
                       size="small"
@@ -307,18 +730,14 @@ export default function BookSettingsDialog({
                 <Typography variant="subtitle2" gutterBottom>
                   {t('bookSettings.remote')}
                 </Typography>
-                {remoteUrl && (
+                {remoteUrl ? null : (
                   <Typography
                     variant="caption"
                     color="text.secondary"
-                    sx={{
-                      display: 'block',
-                      mb: 0.5,
-                      fontFamily: 'var(--font-family-mono)',
-                      fontSize: '0.7rem',
-                    }}
+                    display="block"
+                    mb={0.5}
                   >
-                    {remoteUrl}
+                    {t('repo.noRemote')}
                   </Typography>
                 )}
                 <TextField
@@ -340,6 +759,7 @@ export default function BookSettingsDialog({
                   <Button
                     size="small"
                     variant="outlined"
+                    disabled={!remoteDraft.trim()}
                     onClick={onSetRemoteUrl}
                   >
                     {t('bookSettings.setUrl')}
@@ -389,6 +809,17 @@ export default function BookSettingsDialog({
                       : t('bookSettings.merge')}
                   </Button>
                 </Box>
+
+                {syncOutput && (
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    display="block"
+                    sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+                  >
+                    {syncOutput}
+                  </Typography>
+                )}
 
                 {conflictedFiles.length > 0 && (
                   <Box mt={1} mb={1}>
@@ -440,7 +871,7 @@ export default function BookSettingsDialog({
                         </Button>
                       </Box>
                     ))}
-                    {conflictedFiles.every((f) => resolvedFiles.has(f)) && (
+                    {!conflictsUnresolved && (
                       <Button
                         size="small"
                         variant="contained"
@@ -457,74 +888,190 @@ export default function BookSettingsDialog({
           </Box>
         )}
 
-        {tab === 'log' && (
+        {tab === 'activity' && (
           <Box>
-            <Button
-              size="small"
-              onClick={async () => {
-                const entries = await onRefreshLogs()
-                if (entries.length > 0) setDialogLogs(entries)
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1,
+                mb: 1.5,
               }}
-              sx={{ mb: 1 }}
             >
-              {t('common.refresh')}
-            </Button>
-            {displayLogs.length === 0 ? (
+              <Select
+                size="small"
+                value={activityFilter}
+                onChange={(e) =>
+                  setActivityFilter(
+                    e.target.value as 'all' | ActivityCategory,
+                  )
+                }
+                sx={{ fontSize: '0.75rem', minWidth: 110 }}
+              >
+                <MenuItem value="all" sx={{ fontSize: '0.75rem' }}>
+                  {t('bookSettings.activityAll')}
+                </MenuItem>
+                <MenuItem value="commit" sx={{ fontSize: '0.75rem' }}>
+                  {t('bookSettings.activityCommit')}
+                </MenuItem>
+                <MenuItem value="chapter" sx={{ fontSize: '0.75rem' }}>
+                  {t('bookSettings.activityChapter')}
+                </MenuItem>
+                <MenuItem value="git" sx={{ fontSize: '0.75rem' }}>
+                  {t('bookSettings.activityGit')}
+                </MenuItem>
+                <MenuItem value="image" sx={{ fontSize: '0.75rem' }}>
+                  {t('bookSettings.activityImage')}
+                </MenuItem>
+                <MenuItem value="other" sx={{ fontSize: '0.75rem' }}>
+                  {t('bookSettings.activityOther')}
+                </MenuItem>
+              </Select>
+              <Box sx={{ flex: 1 }} />
+              <Button
+                size="small"
+                onClick={() => void onRefreshActivity()}
+                disabled={activityLoading}
+              >
+                {t('common.refresh')}
+              </Button>
+            </Box>
+
+            {activityLoading && activity.length === 0 ? (
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                  py: 2,
+                  color: 'text.secondary',
+                }}
+              >
+                <CircularProgress size={16} />
+                <Typography variant="body2">
+                  {t('common.loading')}
+                </Typography>
+              </Box>
+            ) : activityError ? (
+              <Alert severity="error">{activityError}</Alert>
+            ) : filteredActivity.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
-                {t('bookSettings.noLogs')}
+                {t('bookSettings.activityEmpty')}
               </Typography>
             ) : (
               <Box
                 sx={{
-                  fontFamily: 'var(--font-family-mono)',
-                  fontSize: '0.7rem',
-                  whiteSpace: 'pre-wrap',
-                  lineHeight: 1.6,
-                  maxHeight: 350,
+                  maxHeight: 380,
                   overflow: 'auto',
                   border: 1,
                   borderColor: 'divider',
                   borderRadius: 1,
-                  p: 1,
                 }}
               >
-                {displayLogs.map((entry, i) => (
-                  <Box
-                    key={i}
-                    sx={{
-                      py: 0.2,
-                      borderBottom: '1px solid',
-                      borderColor: 'divider',
-                    }}
-                  >
+                {filteredActivity.map((item, index) => {
+                  const failed = isFailed(item)
+                  return (
                     <Box
-                      component="span"
-                      sx={{ color: 'text.secondary', mr: 1 }}
-                    >
-                      {new Date(entry.t).toLocaleString()}
-                    </Box>
-                    <Box
-                      component="span"
+                      key={
+                        item.kind === 'commit'
+                          ? `commit-${item.hash}`
+                          : `event-${item.timestamp}-${index}`
+                      }
                       sx={{
-                        color:
-                          /set_|import_image|paste_image|download_image/.test(
-                            entry.e,
-                          )
-                            ? 'info.main'
-                            : entry.e.startsWith('create_')
-                              ? 'success.main'
-                              : entry.e.startsWith('delete_')
-                                ? 'error.main'
-                                : 'warning.main',
-                        mr: 1,
-                        fontWeight: 600,
+                        px: 1,
+                        py: 0.6,
+                        borderBottom: '1px solid',
+                        borderColor: 'divider',
+                        '&:last-of-type': { borderBottom: 0 },
                       }}
                     >
-                      [{entry.e}]
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'baseline',
+                          gap: 0.75,
+                        }}
+                      >
+                        <Box
+                          sx={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: '50%',
+                            flexShrink: 0,
+                            bgcolor:
+                              item.kind === 'commit'
+                                ? 'info.main'
+                                : failed
+                                  ? 'error.main'
+                                  : 'success.main',
+                          }}
+                        />
+                        <Chip
+                          label={
+                            item.kind === 'commit'
+                              ? item.short_hash
+                              : item.event
+                          }
+                          size="small"
+                          color={failed ? 'error' : 'default'}
+                          sx={{
+                            height: 18,
+                            fontSize: '0.62rem',
+                            fontFamily: 'var(--font-family-mono)',
+                          }}
+                        />
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            fontSize: '0.75rem',
+                            flex: 1,
+                            minWidth: 0,
+                            wordBreak: 'break-word',
+                          }}
+                        >
+                          {item.kind === 'commit' ? item.message : item.detail}
+                        </Typography>
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          sx={{ fontSize: '0.64rem', flexShrink: 0 }}
+                        >
+                          {formatRelativeTime(item.timestamp)}
+                        </Typography>
+                      </Box>
+                      {item.kind === 'commit' ? (
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          sx={{
+                            fontSize: '0.64rem',
+                            display: 'block',
+                            ml: 1.4,
+                          }}
+                        >
+                          {item.author} · {item.email}
+                        </Typography>
+                      ) : (
+                        (failed || item.code) && (
+                          <Typography
+                            variant="caption"
+                            color={failed ? 'error.main' : 'text.secondary'}
+                            sx={{
+                              fontSize: '0.64rem',
+                              display: 'block',
+                              ml: 1.4,
+                              wordBreak: 'break-word',
+                            }}
+                          >
+                            {failed
+                              ? t('bookSettings.activityFailed')
+                              : item.code}
+                          </Typography>
+                        )
+                      )}
                     </Box>
-                    <Box component="span">{entry.d}</Box>
-                  </Box>
-                ))}
+                  )
+                })}
               </Box>
             )}
           </Box>

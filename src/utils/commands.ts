@@ -1,6 +1,15 @@
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 
-import type { BookInfo, BookKind, BookMeta, Chapter, CommitInfo } from '../types'
+import type {
+  ActivityItem,
+  BookIdentity,
+  BookInfo,
+  BookKind,
+  BookMeta,
+  Chapter,
+  CommitInfo,
+  RepoState,
+} from '../types'
 
 export function listBooks(): Promise<BookInfo[]> {
   return invoke('list_books')
@@ -201,6 +210,57 @@ export function gitPush(bookPath: string): Promise<string> {
 
 export function gitAheadBehind(bookPath: string): Promise<[number, number]> {
   return invoke('git_ahead_behind', { bookPath })
+}
+
+/** 统一的仓库状态：分支、远程、ahead/behind、工作区与最近提交 */
+export function getRepoState(bookPath: string): Promise<RepoState> {
+  return invoke('get_repo_state', { bookPath })
+}
+
+/** 为书籍启用版本管理：初始化仓库并用当前生效身份创建初始提交 */
+export function enableVersionControl(bookPath: string): Promise<RepoState> {
+  return invoke('enable_version_control', { bookPath })
+}
+
+/** 合并提交历史与应用事件，按时间倒序 */
+export function getBookActivity(
+  bookPath: string,
+  limit?: number,
+): Promise<ActivityItem[]> {
+  return invoke('get_book_activity', { bookPath, limit })
+}
+
+/** 本书提交身份：区分本地覆盖与全局继承 */
+export function getBookIdentity(bookPath: string): Promise<BookIdentity> {
+  return invoke('get_book_identity', { bookPath })
+}
+
+/** 设置本书提交身份；姓名和邮箱都传空字符串表示跟随全局 */
+export function setBookIdentity(
+  bookPath: string,
+  name: string,
+  email: string,
+): Promise<void> {
+  return invoke('set_book_identity', { bookPath, name, email })
+}
+
+/** 把 Tauri 命令错误（字符串或 AppError 对象）统一成可展示文本 */
+export function formatInvokeError(error: unknown): string {
+  if (typeof error === 'string') return error
+  if (error && typeof error === 'object') {
+    const value = error as { message?: unknown; detail?: unknown; code?: unknown }
+    if (typeof value.message === 'string' && value.message) {
+      const detail = typeof value.detail === 'string' ? value.detail : ''
+      return detail ? `${value.message}: ${detail}` : value.message
+    }
+    if (typeof value.code === 'string') return value.code
+    try {
+      return JSON.stringify(error)
+    } catch {
+      return String(error)
+    }
+  }
+  return String(error)
 }
 
 export function gitUserConfig(bookPath: string): Promise<[string, string]> {

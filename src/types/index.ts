@@ -29,7 +29,61 @@ export interface BookInfo {
 
 export interface CommitInfo {
   hash: string;
+  short_hash: string;
   message: string;
   author: string;
+  email: string;
   timestamp: number;
 }
+
+export interface RepoFileStatus {
+  path: string;
+  code: string;
+  staged: boolean;
+}
+
+export interface RepoState {
+  initialized: boolean;
+  branch: string | null;
+  detached: boolean;
+  remote_url: string | null;
+  tracking: string | null;
+  ahead: number;
+  behind: number;
+  dirty: RepoFileStatus[];
+  conflicted: string[];
+  head: CommitInfo | null;
+  recent_commits: CommitInfo[];
+  last_sync_at: number | null;
+}
+
+export interface BookIdentity {
+  local_name: string | null;
+  local_email: string | null;
+  global_name: string | null;
+  global_email: string | null;
+  effective_name: string | null;
+  effective_email: string | null;
+  source: 'book' | 'global' | 'none';
+}
+
+export type ActivityItem =
+  | {
+      kind: 'commit';
+      hash: string;
+      short_hash: string;
+      message: string;
+      author: string;
+      email: string;
+      timestamp: number;
+    }
+  | {
+      kind: 'event';
+      timestamp: number;
+      event: string;
+      detail: string;
+      result: string;
+      code: string | null;
+    };
+
+export type ActivityCategory = 'commit' | 'chapter' | 'git' | 'image' | 'other';

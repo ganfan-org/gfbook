@@ -1,24 +1,23 @@
 import { useCallback } from 'react'
 
 import {
-  gitRemoteUrl,
-  gitRemoteSetUrl,
   gitFetch,
   gitPull,
   gitPush,
-  gitAheadBehind,
+  gitRemoteSetUrl,
+  gitRemoteUrl,
 } from '../utils/commands'
 
-export function useBookGitRemote(
-  bookPath: string | null,
-  refreshGitStatus: () => Promise<void>,
-) {
+/**
+ * 异步 Git 操作只负责启动；完成与状态刷新由 `git:done` 事件驱动。
+ */
+export function useBookGitRemote(bookPath: string | null) {
   const getRemoteUrl = useCallback(async (): Promise<string | null> => {
     if (!bookPath) return null
     return gitRemoteUrl(bookPath)
   }, [bookPath])
 
-  const setRemoteUrlApi = useCallback(
+  const setRemoteUrl = useCallback(
     async (url: string): Promise<void> => {
       if (!bookPath) throw new Error('No book selected')
       await gitRemoteSetUrl(bookPath, url)
@@ -29,35 +28,20 @@ export function useBookGitRemote(
   const fetchRemote = useCallback(async (): Promise<string> => {
     if (!bookPath) throw new Error('No book selected')
     await gitFetch(bookPath)
-    await refreshGitStatus()
     return 'started'
-  }, [bookPath, refreshGitStatus])
+  }, [bookPath])
 
   const pullRemote = useCallback(async (): Promise<string> => {
     if (!bookPath) throw new Error('No book selected')
     await gitPull(bookPath)
-    await refreshGitStatus()
     return 'started'
-  }, [bookPath, refreshGitStatus])
+  }, [bookPath])
 
   const pushRemote = useCallback(async (): Promise<string> => {
     if (!bookPath) throw new Error('No book selected')
     await gitPush(bookPath)
-    await refreshGitStatus()
     return 'started'
-  }, [bookPath, refreshGitStatus])
-
-  const getAheadBehind = useCallback(async (): Promise<[number, number]> => {
-    if (!bookPath) return [0, 0]
-    return gitAheadBehind(bookPath)
   }, [bookPath])
 
-  return {
-    getRemoteUrl,
-    setRemoteUrl: setRemoteUrlApi,
-    fetchRemote,
-    pullRemote,
-    pushRemote,
-    getAheadBehind,
-  }
+  return { getRemoteUrl, setRemoteUrl, fetchRemote, pullRemote, pushRemote }
 }

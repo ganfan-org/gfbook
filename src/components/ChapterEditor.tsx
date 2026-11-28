@@ -1,4 +1,4 @@
-import { Box, Typography } from '@mui/material'
+import { Alert, Box, Button, Typography } from '@mui/material'
 import { invoke } from '@tauri-apps/api/core'
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
 import Image from '@tiptap/extension-image'
@@ -30,10 +30,17 @@ import MathDialog from './MathDialog'
 import 'katex/dist/katex.min.css'
 import './ChapterEditor.css'
 
+export type SaveStatus = 'saved' | 'saving' | 'dirty' | 'error'
+
 interface ChapterEditorProps {
   content: string
   bookPath: string
   onContentChange: (markdown: string) => void
+  saveStatus: SaveStatus
+  saveError: string | null
+  onDirty: () => void
+  onRetrySave: () => void
+  onReloadContent: () => void
 }
 
 function stripMailtoLinks(node: any): any {
@@ -64,14 +71,17 @@ function useTipTapEditor(
   mathEditRef: React.MutableRefObject<
     ((pos: number, type: string, latex: string) => void) | null
   >,
+  onDirty: () => void,
 ) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const onChangeRef = useRef(onContentChange)
+  const onDirtyRef = useRef(onDirty)
   const lastSavedRef = useRef('')
   const initializedRef = useRef(false)
   const bookPathRef = useRef(bookPath)
   const prevContentRef = useRef(content)
   const saveWithOldRef = useRef<((m: string) => void) | null>(null)
+  const parseErrorRef = useRef(false)
 
   // Capture old save callback BEFORE it gets overwritten on chapter switch
   if (content !== prevContentRef.current) {
@@ -80,6 +90,7 @@ function useTipTapEditor(
   }
 
   onChangeRef.current = onContentChange
+  onDirtyRef.current = onDirty
   bookPathRef.current = bookPath
 
   const ImageWithAsset = useMemo(() => {
@@ -99,8 +110,9 @@ function useTipTapEditor(
     })
   }, [])
 
-  const parsedContent = useMemo(() => {
-    if (!content) return { type: 'doc', content: [{ type: 'paragraph' }] }
+  const parsed = useMemo(() => {
+    const emptyDoc = { type: 'doc', content: [{ type: 'paragraph' }] }
+    if (!content) return { doc: emptyDoc, failed: false }
     try {
       const ext = [
         StarterKit.configure({
@@ -116,11 +128,15 @@ function useTipTapEditor(
       ]
       const doc = new MarkdownManager({ extensions: ext }).parse(content)
       // Strip mailto links from parsed content
-      return stripMailtoLinks(doc)
+      return { doc: stripMailtoLinks(doc), failed: false }
     } catch {
-      return { type: 'doc', content: [{ type: 'paragraph' }] }
+      // 解析失败时保留原文，禁止编辑与自动保存，避免把空文档写回磁盘
+      return { doc: emptyDoc, failed: true }
     }
   }, [content])
+
+  const parsedContent = parsed.doc
+  parseErrorRef.current = parsed.failed
 
   const serializerRef = useRef<MarkdownManager | null>(null)
   const getSerializer = useCallback(() => {
@@ -232,6 +248,7 @@ function useTipTapEditor(
     content: parsedContent,
     editorProps,
     onUpdate: ({ editor: ed }) => {
+      if (parseErrorRef.current) return
       let markdown = ''
       try {
         markdown = getSerializer().serialize(ed.getJSON())
@@ -246,6 +263,7 @@ function useTipTapEditor(
       }
       if (markdown === lastSavedRef.current) return
       lastSavedRef.current = markdown
+      onDirtyRef.current()
       if (debounceRef.current) clearTimeout(debounceRef.current)
       debounceRef.current = setTimeout(() => onChangeRef.current(markdown), 500)
     },
@@ -253,7 +271,7 @@ function useTipTapEditor(
 
   // Force-save old content when switching chapters (runs during render, before editor update)
   if (saveWithOldRef.current) {
-    if (editor && initializedRef.current) {
+    if (editor && initializedRef.current && !parseErrorRef.current) {
       if (debounceRef.current) clearTimeout(debounceRef.current)
       try {
         const markdown = getSerializer().serialize(editor.getJSON())
@@ -295,7 +313,7 @@ function useTipTapEditor(
     })()
   }, [editor])
 
-  return editor
+  return { editor, parseError: parsed.failed }
 }
 
 async function insertImage(
@@ -436,7 +454,13 @@ export default function ChapterEditor({
   content,
   bookPath,
   onContentChange,
+  saveStatus,
+  saveError,
+  onDirty,
+  onRetrySave,
+  onReloadContent,
 }: ChapterEditorProps) {
+  const { t } = useTranslation()
   const [tocOpen, setTocOpen] = useState(false)
   const [tocItems, setTocItems] = useState<
     { level: number; text: string; pos: number }[]
@@ -460,12 +484,19 @@ export default function ChapterEditor({
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const savedScrollTopRef = useRef<number | null>(null)
 
-  const editor = useTipTapEditor(
+  const { editor, parseError } = useTipTapEditor(
     content,
     onContentChange,
     bookPath,
     mathEditRef,
+    onDirty,
   )
+
+  // 解析失败时禁止编辑，避免用户改动被序列化成空文档
+  useEffect(() => {
+    if (!editor) return
+    editor.setEditable(!parseError)
+  }, [editor, parseError])
 
   mathEditRef.current = (pos: number, typeName: string, latex: string) => {
     setMathPos(pos)
@@ -705,28 +736,110 @@ export default function ChapterEditor({
     }
   }
 
+  const saveLabel =
+    saveStatus === 'saved'
+      ? t('editor.saveSaved')
+      : saveStatus === 'saving'
+        ? t('editor.saveSaving')
+        : saveStatus === 'dirty'
+          ? t('editor.saveDirty')
+          : t('editor.saveError')
+  const saveColor =
+    saveStatus === 'saved'
+      ? 'success.main'
+      : saveStatus === 'error'
+        ? 'error.main'
+        : saveStatus === 'saving'
+          ? 'info.main'
+          : 'warning.main'
+
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <EditorToolbar
-        editor={editor}
-        tocOpen={tocOpen}
-        bookPath={bookPath}
-        onToggleToc={() => setTocOpen(!tocOpen)}
-        onAddLink={() => {
-          setLinkUrl('https://')
-          setLinkInEdit(false)
-          setLinkText('')
-          setLinkDialogOpen(true)
+      {!parseError && (
+        <EditorToolbar
+          editor={editor}
+          tocOpen={tocOpen}
+          bookPath={bookPath}
+          onToggleToc={() => setTocOpen(!tocOpen)}
+          onAddLink={() => {
+            setLinkUrl('https://')
+            setLinkInEdit(false)
+            setLinkText('')
+            setLinkDialogOpen(true)
+          }}
+          onEditMath={(type) => editMath(type)}
+          onInsertImage={() => insertImage(editor, bookPath)}
+        />
+      )}
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+          px: 2,
+          minHeight: 24,
+          borderBottom: 1,
+          borderColor: 'divider',
+          flexShrink: 0,
         }}
-        onEditMath={(type) => editMath(type)}
-        onInsertImage={() => insertImage(editor, bookPath)}
-      />
-      <EditorArea
-        editor={editor}
-        tocOpen={tocOpen}
-        tocItems={tocItems}
-        scrollContainerRef={scrollContainerRef}
-      />
+      >
+        <Box
+          sx={{
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            flexShrink: 0,
+            bgcolor: saveColor,
+          }}
+        />
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ fontSize: '0.68rem', flexShrink: 0 }}
+        >
+          {saveLabel}
+        </Typography>
+        {saveStatus === 'error' && (
+          <Button
+            size="small"
+            onClick={onRetrySave}
+            sx={{ minWidth: 0, py: 0, px: 0.5, fontSize: '0.68rem' }}
+          >
+            {t('editor.retry')}
+          </Button>
+        )}
+        {saveStatus === 'error' && saveError && (
+          <Typography
+            variant="caption"
+            color="error"
+            noWrap
+            sx={{ fontSize: '0.66rem', minWidth: 0, flex: 1, textAlign: 'right' }}
+          >
+            {saveError}
+          </Typography>
+        )}
+      </Box>
+      {parseError ? (
+        <Box sx={{ p: 2 }}>
+          <Alert
+            severity="error"
+            action={
+              <Button color="inherit" size="small" onClick={onReloadContent}>
+                {t('editor.reload')}
+              </Button>
+            }
+          >
+            {t('editor.parseFailed')}
+          </Alert>
+        </Box>
+      ) : (
+        <EditorArea
+          editor={editor}
+          tocOpen={tocOpen}
+          tocItems={tocItems}
+          scrollContainerRef={scrollContainerRef}
+        />
+      )}
       <LinkDialog
         open={linkDialogOpen}
         onClose={() => {
