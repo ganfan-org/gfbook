@@ -2,20 +2,14 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "tauri:build-dev",
+      "label": "dev:build",
       "type": "shell",
-      "command": "cargo",
+      "command": "bash",
       "args": [
-        "build",
-        "--manifest-path",
-        "${workspaceFolder}/src-tauri/Cargo.toml",
-        "--no-default-features"
+        "${workspaceFolder}/scripts/debug-build.sh"
       ],
       "options": {
-        "cwd": "${workspaceFolder}",
-        "env": {
-          "TAURI_CONFIG": "{\"productName\":\"Ganfan Book Dev\",\"identifier\":\"org.ganfan.app.gfbook.dev\"}"
-        }
+        "cwd": "${workspaceFolder}"
       },
       "problemMatcher": [
         "$rustc"
@@ -28,13 +22,15 @@
     {
       "label": "vite:dev",
       "type": "shell",
-      "command": "npm",
+      "command": "bash",
       "args": [
-        "run",
-        "dev"
+        "${workspaceFolder}/scripts/vite-dev.sh"
       ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
       "dependsOn": [
-        "tauri:build-dev"
+        "dev:build"
       ],
       "dependsOrder": "sequence",
       "isBackground": true,
@@ -45,13 +41,46 @@
         },
         "background": {
           "activeOnStart": true,
-          "beginsPattern": "VITE v",
-          "endsPattern": "http://localhost:1420"
+          "beginsPattern": "\\[vite\\] starting",
+          "endsPattern": "\\[vite\\] ready"
         }
       },
       "presentation": {
         "reveal": "silent",
         "panel": "dedicated"
+      }
+    },
+    {
+      "label": "dev:clean-app",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/scripts/debug-clean-app.sh"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared",
+        "close": true
+      }
+    },
+    {
+      "label": "dev:stop",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/scripts/debug-stop.sh"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
       }
     }
   ]
