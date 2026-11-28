@@ -6,7 +6,7 @@ use git2::{
 };
 
 use crate::error::AppError;
-use crate::models::{BookIdentity, CommitInfo, FileDiff, RepoFileStatus, RepoState};
+use crate::models::{BookIdentity, CommitInfo, FileDiff, RepoFileStatus, RepoState, RepoSummary};
 
 // ═══════════════════════════════════════════
 // 仓库基础
@@ -430,6 +430,46 @@ pub fn git_ahead_behind(book_path: &str) -> Result<(u32, u32), AppError> {
     let repo = open_repo(book_path)?;
     let (_, ahead, behind) = ahead_behind_with_tracking(&repo)?;
     Ok((ahead, behind))
+}
+
+/// 书架状态点用的轻量摘要：不读取提交列表、不计算同步时间。
+pub fn repo_summary(book_path: &str) -> RepoSummary {
+    let empty = RepoSummary {
+        path: book_path.to_string(),
+        initialized: false,
+        dirty: 0,
+        conflicted: 0,
+        ahead: 0,
+        behind: 0,
+        has_remote: false,
+    };
+
+    let Ok(repo) = Repository::open(book_path) else {
+        return empty;
+    };
+
+    let has_remote = repo
+        .find_remote("origin")
+        .ok()
+        .and_then(|remote| remote.url().map(|url| !url.trim().is_empty()))
+        .unwrap_or(false);
+    let (dirty, conflicted) = status_entries(&repo)
+        .map(|entries| {
+            let conflicted = entries.iter().filter(|entry| entry.code.contains('U')).count() as u32;
+            (entries.len() as u32 - conflicted, conflicted)
+        })
+        .unwrap_or((0, 0));
+    let (_, ahead, behind) = ahead_behind_with_tracking(&repo).unwrap_or((None, 0, 0));
+
+    RepoSummary {
+        path: book_path.to_string(),
+        initialized: true,
+        dirty,
+        conflicted,
+        ahead,
+        behind,
+        has_remote,
+    }
 }
 
 fn last_sync_at(repo: &Repository) -> Option<u64> {
@@ -1196,5 +1236,27 @@ mod tests {
         assert!(!state.initialized);
         assert!(state.head.is_none());
         assert!(state.dirty.is_empty());
+    }
+
+    #[test]
+    fn repo_summary_reports_dirty_and_remote_without_history() {
+        let (_isolated, work, _origin) = setup_repo_with_origin();
+        write_file(work.path(), "draft.md", "draft\n");
+
+        let summary = repo_summary(&path_str(work.path()));
+        assert!(summary.initialized);
+        assert!(summary.has_remote);
+        assert_eq!(summary.dirty, 1);
+        assert_eq!(summary.conflicted, 0);
+        assert_eq!(summary.ahead, 0);
+    }
+
+    #[test]
+    fn repo_summary_marks_non_repo_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let summary = repo_summary(&path_str(dir.path()));
+        assert!(!summary.initialized);
+        assert!(!summary.has_remote);
+        assert_eq!(summary.dirty, 0);
     }
 }

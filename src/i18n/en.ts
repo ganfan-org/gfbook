@@ -208,6 +208,12 @@ const en: typeof zh = {
     checking: 'Checking…',
     unknownTime: 'unknown time',
   },
+  repoStatus: {
+    conflict: '{{n}} conflicted files',
+    dirty: '{{n}} uncommitted changes',
+    unpushed: '{{n}} unpushed commits',
+    noRemote: 'No remote configured',
+  },
   problems: {
     title: 'Problems',
     count: '{{n}} problems',

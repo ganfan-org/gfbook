@@ -14,11 +14,11 @@ use crate::book_fs::{
 use crate::error::AppError;
 use crate::models::{
     flatten_chapters, ActivityItem, BackendInfo, BookIdentity, BookInfo, BookKind, BookMeta, BookProblems, Chapter,
-    CommitInfo, FileDiff, RepoState,
+    CommitInfo, FileDiff, RepoState, RepoSummary,
 };
 
 /// 前端要求的后端契约版本。新增或变更命令时递增。
-pub const BACKEND_API_LEVEL: u32 = 2;
+pub const BACKEND_API_LEVEL: u32 = 3;
 use crate::repo;
 
 const CONFIG_FILE: &str = "gfbook-config.json";
@@ -185,6 +185,16 @@ pub fn set_books_dir(app_handle: tauri::AppHandle, dir: String) -> Result<String
 #[tauri::command]
 pub fn list_books(app_handle: tauri::AppHandle) -> Result<Vec<BookInfo>, String> {
     read_book_list(&app_handle)
+}
+
+/// 批量读取书架仓库状态。放到阻塞线程执行，避免 Git 扫描卡住界面。
+#[tauri::command]
+pub async fn get_repo_summaries(book_paths: Vec<String>) -> Vec<RepoSummary> {
+    tauri::async_runtime::spawn_blocking(move || {
+        book_paths.iter().map(|path| crate::repo::repo_summary(path)).collect()
+    })
+    .await
+    .unwrap_or_default()
 }
 
 /// 扫描全库问题。目录来源与书架一致，但包含元数据解析失败的书籍。

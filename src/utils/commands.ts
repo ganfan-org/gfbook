@@ -12,6 +12,7 @@ import type {
   CommitInfo,
   FileDiff,
   RepoState,
+  RepoSummary,
 } from '../types'
 
 export function listBooks(): Promise<BookInfo[]> {
@@ -241,11 +242,16 @@ export function scanBookProblems(bookPath: string): Promise<BookProblems> {
 }
 
 /** 前端要求的后端契约版本，必须与 src-tauri/src/commands.rs 的 BACKEND_API_LEVEL 一致 */
-export const EXPECTED_BACKEND_API = 2
+export const EXPECTED_BACKEND_API = 3
 
 /** 读取后端版本信息，用于检测前端与旧二进制不匹配 */
 export function getBackendInfo(): Promise<BackendInfo> {
   return invoke('get_backend_info')
+}
+
+/** 批量读取书架仓库状态 */
+export function getRepoSummaries(bookPaths: string[]): Promise<RepoSummary[]> {
+  return invoke('get_repo_summaries', { bookPaths })
 }
 
 /** 合并提交历史与应用事件，按时间倒序 */

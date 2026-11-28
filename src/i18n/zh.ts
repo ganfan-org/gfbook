@@ -202,6 +202,12 @@ const zh = {
     checking: '正在检查…',
     unknownTime: '未知时间',
   },
+  repoStatus: {
+    conflict: '{{n}} 个文件冲突',
+    dirty: '{{n}} 处未提交更改',
+    unpushed: '{{n}} 个提交未推送',
+    noRemote: '未配置远程仓库',
+  },
   problems: {
     title: '问题',
     count: '{{n}} 个问题',

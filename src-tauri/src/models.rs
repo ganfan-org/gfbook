@@ -157,6 +157,19 @@ pub struct BookProblems {
     pub problems: Vec<Problem>,
 }
 
+/// 书架卡片用的轻量仓库状态，不读取提交历史。
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RepoSummary {
+    pub path: String,
+    pub initialized: bool,
+    /// 不含冲突的未提交文件数。
+    pub dirty: u32,
+    pub conflicted: u32,
+    pub ahead: u32,
+    pub behind: u32,
+    pub has_remote: bool,
+}
+
 /// 前后端版本握手信息。
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BackendInfo {

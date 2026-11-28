@@ -121,3 +121,14 @@ export interface BackendInfo {
   api_level: number;
   built_at: number;
 }
+
+/** 书架卡片用的轻量仓库状态 */
+export interface RepoSummary {
+  path: string;
+  initialized: boolean;
+  dirty: number;
+  conflicted: number;
+  ahead: number;
+  behind: number;
+  has_remote: boolean;
+}

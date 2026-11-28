@@ -42,11 +42,13 @@ import { useTranslation } from 'react-i18next'
 import ExportDialog from '../components/ExportDialog'
 import ImportMarkdownDialog from '../components/ImportMarkdownDialog'
 import ProblemsDialog from '../components/ProblemsDialog'
+import RepoStatusDot from '../components/RepoStatusDot'
 import SearchDialog from '../components/SearchDialog'
 import { useBooks } from '../hooks/useBooks'
+import { useRepoSummaries } from '../hooks/useRepoSummaries'
 import type { UpdaterApi } from '../hooks/useUpdater'
 import { changeLang, currentLang, type AppLang } from '../i18n'
-import type { BookInfo, BookKind } from '../types'
+import type { BookInfo, BookKind, RepoSummary } from '../types'
 import { readLogs, scanLibraryProblems, type LogEntry } from '../utils/commands'
 import { formatBookDate } from '../utils/date'
 
@@ -83,6 +85,7 @@ function BookCover({
   onRename,
   onDelete,
   onExport,
+  summary,
 }: {
   title: string
   kind?: BookKind
@@ -91,6 +94,7 @@ function BookCover({
   onRename: (t: string) => void
   onDelete: () => void
   onExport: () => void
+  summary?: RepoSummary
 }) {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
   const [menuHover, setMenuHover] = useState(false)
@@ -255,10 +259,21 @@ function BookCover({
             <MoreVertIcon sx={{ fontSize: 15 }} />
           </IconButton>
         </Box>
-        <CardContent sx={{ px: 2, py: 1.25, '&:last-child': { pb: 1.25 } }}>
+        <CardContent
+          sx={{
+            px: 2,
+            py: 1.25,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 1,
+            '&:last-child': { pb: 1.25 },
+          }}
+        >
           <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.75rem' }}>
             {formatBookDate(updatedTime)}
           </Typography>
+          <RepoStatusDot summary={summary} />
         </CardContent>
       </Card>
 
@@ -369,6 +384,9 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode, updater }: 
   useEffect(() => {
     void refreshProblemCount()
   }, [refreshProblemCount, books.length])
+
+  const bookPaths = useMemo(() => books.map(book => book.path), [books])
+  const repoSummaries = useRepoSummaries(bookPaths)
 
   const handleNewBook = async () => {
     const title = newTitle.trim()
@@ -605,6 +623,7 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode, updater }: 
                 setExportPreselect([book.path])
                 setExportOpen(true)
               }}
+              summary={repoSummaries[book.path]}
             />
           ))}
         </Box>
