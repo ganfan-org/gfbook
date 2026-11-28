@@ -195,9 +195,16 @@ const en: typeof zh = {
     updateFailed: 'Something went wrong. Please try again.',
   },
   updater: {
+    section: 'Software Update',
     ready: 'A new version has been downloaded and is ready to install.',
     later: 'Later',
     restart: 'Restart to Update',
+    check: 'Check for Updates…',
+    checking: 'Checking for updates…',
+    downloading: 'A new version was found. Downloading…',
+    upToDate: 'You’re up to date.',
+    failed: 'Update failed: {{reason}}',
+    unavailable: 'Updates are not available in this environment.',
   },
   editor: {
     loadingEditor: 'Loading editor...',

@@ -70,6 +70,7 @@ function App() {
         />
       ) : (
         <BookShelf
+          updater={updater}
           onOpenBook={(bookInfo, chapterId) => {
             setCurrentBook(bookInfo)
             setPendingChapterId(chapterId ?? null)

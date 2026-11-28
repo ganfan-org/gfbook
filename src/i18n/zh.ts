@@ -193,9 +193,16 @@ const zh = {
     updateFailed: '操作失败，请重试',
   },
   updater: {
+    section: '软件更新',
     ready: '新版本已下载，重启后生效。',
     later: '稍后',
     restart: '重启安装',
+    check: '检查更新…',
+    checking: '正在检查更新…',
+    downloading: '发现新版本，正在下载…',
+    upToDate: '已是最新版本。',
+    failed: '更新失败：{{reason}}',
+    unavailable: '当前环境不支持检查更新。',
   },
   editor: {
     loadingEditor: '编辑器加载中…',

@@ -41,6 +41,7 @@ import ExportDialog from '../components/ExportDialog'
 import ImportMarkdownDialog from '../components/ImportMarkdownDialog'
 import SearchDialog from '../components/SearchDialog'
 import { useBooks } from '../hooks/useBooks'
+import type { UpdaterApi } from '../hooks/useUpdater'
 import { changeLang, currentLang, type AppLang } from '../i18n'
 import type { BookInfo, BookKind } from '../types'
 import { readLogs, type LogEntry } from '../utils/commands'
@@ -325,9 +326,10 @@ interface BookShelfProps {
   onOpenBook: (book: BookInfo, chapterId?: string) => void
   onToggleTheme: () => void
   mode: 'light' | 'dark'
+  updater: UpdaterApi
 }
 
-export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelfProps) {
+export default function BookShelf({ onOpenBook, onToggleTheme, mode, updater }: BookShelfProps) {
   const { t } = useTranslation()
   const [lang, setLang] = useState<AppLang>(() => currentLang())
   const { books, loading, createBook, removeBook, changeBookName, importExternalBook, importMarkdownBook, getGlobalSettings, setGlobalSettings } = useBooks()
@@ -698,6 +700,53 @@ export default function BookShelf({ onOpenBook, onToggleTheme, mode }: BookShelf
             <ToggleButton value="zh">中文</ToggleButton>
             <ToggleButton value="en">English</ToggleButton>
           </ToggleButtonGroup>
+
+          <Divider sx={{ my: 2 }} />
+
+          <Typography variant="subtitle2" gutterBottom>{t('updater.section')}</Typography>
+          <Box display="flex" alignItems="center" gap={1.5}>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => void updater.checkNow()}
+              disabled={
+                updater.status === 'checking' || updater.status === 'downloading'
+              }
+              startIcon={
+                updater.status === 'checking' || updater.status === 'downloading'
+                  ? <CircularProgress size={14} />
+                  : undefined
+              }
+            >
+              {updater.status === 'checking'
+                ? t('updater.checking')
+                : updater.status === 'downloading'
+                  ? t('updater.downloading')
+                  : t('updater.check')}
+            </Button>
+            {updater.status === 'ready' && (
+              <Button variant="contained" size="small" onClick={() => void updater.install()}>
+                {t('updater.restart')}
+              </Button>
+            )}
+          </Box>
+          {updater.status === 'up-to-date' && (
+            <Typography variant="body2" color="success.main" sx={{ mt: 1 }}>
+              {t('updater.upToDate')}
+            </Typography>
+          )}
+          {updater.status === 'ready' && (
+            <Typography variant="body2" color="success.main" sx={{ mt: 1 }}>
+              {t('updater.ready')}
+            </Typography>
+          )}
+          {updater.status === 'error' && (
+            <Alert severity="error" sx={{ mt: 1.5 }}>
+              {updater.error
+                ? t('updater.failed', { reason: updater.error })
+                : t('updater.unavailable')}
+            </Alert>
+          )}
 
           <Divider sx={{ my: 2 }} />
 
