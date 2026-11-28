@@ -9,12 +9,15 @@ export function useBook(bookPath: string | null) {
   const git = useBookGit(bookPath)
   const remote = useBookGitRemote(bookPath, git.refreshGitStatus)
 
+  const { refreshMeta } = chapters
+  const { refreshGitStatus } = git
+
   useEffect(() => {
     if (bookPath) {
-      chapters.refreshMeta()
-      git.refreshGitStatus()
+      refreshMeta()
+      refreshGitStatus()
     }
-  }, [bookPath, chapters.refreshMeta, git.refreshGitStatus])
+  }, [bookPath, refreshMeta, refreshGitStatus])
 
   return {
     ...chapters,

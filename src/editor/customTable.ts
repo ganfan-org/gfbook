@@ -8,6 +8,7 @@ function parseTableCellInline(tokens: any[], h: any) {
   for (const node of inline) {
     if (node.type === 'text' && node.text) {
       // Split by \x1f (legacy) or <br>
+      // eslint-disable-next-line no-control-regex
       const parts = node.text.split(/[\x1f]|<br\s*\/?>/gi)
       if (parts.length > 1) {
         parts.forEach((part: string, i: number) => {
@@ -69,6 +70,7 @@ export const CustomTable = Table.extend({
   renderMarkdown(node: any, h: any, ctx?: any) {
     if (!originalTableRender) return ''
     return originalTableRender(node, h, ctx)
+      // eslint-disable-next-line no-control-regex
       .replace(/\x1f/g, '<br>')
       .replace(/^\n+/, '')
       .replace(/\n+$/, '')

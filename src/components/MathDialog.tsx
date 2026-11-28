@@ -15,6 +15,7 @@ interface MathPreviewProps {
 }
 
 function MathPreview({ latex }: MathPreviewProps) {
+  // eslint-disable-next-line @eslint-react/error-boundaries
   try {
     return (
       <Box
@@ -73,7 +74,10 @@ export default function MathDialog({
           multiline={isBlock}
           rows={isBlock ? 3 : 1}
           value={latex}
-          onChange={(e) => onLatexChange(e.target.value.replace(/\x1b/g, ''))}
+          onChange={(e) =>
+            // eslint-disable-next-line no-control-regex
+            onLatexChange(e.target.value.replace(/\x1b/g, ''))
+          }
           onKeyDown={(e) => {
             if (e.key === 'Escape') {
               e.preventDefault()

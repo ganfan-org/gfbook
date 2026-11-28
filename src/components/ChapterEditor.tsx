@@ -168,7 +168,7 @@ function useTipTapEditor(
         },
       }),
     ],
-    [],
+    [ImageWithAsset, mathEditRef],
   )
 
   const editorProps = useMemo(
@@ -476,6 +476,7 @@ export default function ChapterEditor({
 
   const handleMathSubmit = () => {
     if (!editor) return
+    // eslint-disable-next-line no-control-regex
     const cleanLatex = mathLatex.replace(/\x1b/g, '').trim()
     if (!cleanLatex) return
     if (mathPos !== null) {
@@ -638,7 +639,7 @@ export default function ChapterEditor({
     return () => {
       editor.off('update', handler)
     }
-  }, [editor])
+  }, [editor, bookPath])
 
   // TOC
   useEffect(() => {
