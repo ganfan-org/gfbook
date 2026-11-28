@@ -1,7 +1,9 @@
+mod book_fs;
 mod commands;
-mod git;
+mod error;
 mod logger;
 mod models;
+mod repo;
 
 use commands::*;
 
@@ -44,6 +46,10 @@ pub fn run() {
             git_pull,
             git_push,
             git_ahead_behind,
+            get_repo_state,
+            get_book_identity,
+            set_book_identity,
+            get_book_activity,
             git_user_config,
             git_set_user_config,
             git_get_proxy,

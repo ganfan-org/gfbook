@@ -4,11 +4,19 @@ use std::path::PathBuf;
 use tauri::{Emitter, Manager};
 use uuid::Uuid;
 
-use crate::git;
-use crate::models::{BookInfo, BookKind, BookMeta, Chapter, CommitInfo, flatten_chapters};
+use crate::book_fs::{
+    chapter_file_path, create_chapter_file, current_timestamp, delete_chapter_file, load_meta,
+    move_chapter as move_chapter_in_tree, move_chapter_down as move_chapter_down_in_tree,
+    move_chapter_up as move_chapter_up_in_tree, read_chapter_file, remove_chapter_tree, save_meta, slugify,
+    sort_diary_entries, sync_entry_heading, validate_date, validate_diary_chapters, with_book_lock, write_chapter_file,
+    CHAPTERS_DIR, META_FILE,
+};
+use crate::error::AppError;
+use crate::models::{
+    flatten_chapters, ActivityItem, BookIdentity, BookInfo, BookKind, BookMeta, Chapter, CommitInfo, RepoState,
+};
+use crate::repo;
 
-const META_FILE: &str = "gfbook.yaml";
-const CHAPTERS_DIR: &str = "chapters";
 const CONFIG_FILE: &str = "gfbook-config.json";
 
 fn get_config_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -22,8 +30,7 @@ fn get_config_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
 fn load_config(app_handle: &tauri::AppHandle) -> Result<serde_json::Value, String> {
     let config_path = get_config_path(app_handle)?;
     if config_path.exists() {
-        let content =
-            fs::read_to_string(&config_path).map_err(|e| format!("Failed to read config: {}", e))?;
+        let content = fs::read_to_string(&config_path).map_err(|e| format!("Failed to read config: {}", e))?;
         serde_json::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))
     } else {
         Ok(serde_json::json!({}))
@@ -34,11 +41,9 @@ fn save_config(app_handle: &tauri::AppHandle, config: &serde_json::Value) -> Res
     let config_path = get_config_path(app_handle)?;
     // app_data_dir 首次使用时并不存在，必须先创建，否则 fs::write 会报 ENOENT
     if let Some(parent) = config_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create config dir: {}", e))?;
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create config dir: {}", e))?;
     }
-    let content = serde_json::to_string_pretty(config)
-        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+    let content = serde_json::to_string_pretty(config).map_err(|e| format!("Failed to serialize config: {}", e))?;
     fs::write(&config_path, &content).map_err(|e| format!("Failed to write config: {}", e))?;
     Ok(())
 }
@@ -64,11 +69,7 @@ fn read_book_list(app_handle: &tauri::AppHandle) -> Result<Vec<BookInfo>, String
     let paths: Vec<String> = config
         .get("books")
         .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect()
-        })
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
         .unwrap_or_default();
 
     let mut books: Vec<BookInfo> = Vec::new();
@@ -152,110 +153,6 @@ fn remove_from_book_list(app_handle: &tauri::AppHandle, path: &str) -> Result<()
     save_config(app_handle, &config)
 }
 
-fn slugify(title: &str) -> String {
-    title
-        .to_lowercase()
-        .replace(' ', "-")
-        .chars()
-        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
-        .collect()
-}
-
-fn load_meta(book_path: &str) -> Result<BookMeta, String> {
-    let meta_path = PathBuf::from(book_path).join(META_FILE);
-    let content =
-        fs::read_to_string(&meta_path).map_err(|e| format!("Failed to read meta file: {}", e))?;
-    let mut meta: BookMeta =
-        serde_yaml::from_str(&content).map_err(|e| format!("Failed to parse meta file: {}", e))?;
-    normalize_legacy_diary_dates(&mut meta);
-    Ok(meta)
-}
-
-/// 兼容旧日记数据：当条目没有 `date`、但 `id` 本身就是合法日期时，补上 `date`。
-/// 只在内存中补全，不在读取时写盘，避免打开书就产生变更。
-fn normalize_legacy_diary_dates(meta: &mut BookMeta) {
-    if meta.kind != BookKind::Diary {
-        return;
-    }
-    for chapter in &mut meta.chapters {
-        if chapter.date.is_none() {
-            if let Ok(date) = chrono::NaiveDate::parse_from_str(&chapter.id, "%Y-%m-%d") {
-                chapter.date = Some(date.format("%Y-%m-%d").to_string());
-            }
-        }
-    }
-}
-
-fn save_meta(book_path: &str, meta: &BookMeta) -> Result<(), String> {
-    let mut meta = meta.clone();
-    meta.updated_time = current_timestamp();
-    let content =
-        serde_yaml::to_string(&meta).map_err(|e| format!("Failed to serialize meta: {}", e))?;
-    let meta_path = PathBuf::from(book_path).join(META_FILE);
-    fs::write(&meta_path, &content).map_err(|e| format!("Failed to write meta file: {}", e))?;
-    Ok(())
-}
-
-fn chapter_file_path(book_path: &str, chapter_id: &str) -> PathBuf {
-    PathBuf::from(book_path)
-        .join(CHAPTERS_DIR)
-        .join(format!("{}.md", chapter_id))
-}
-
-
-fn current_timestamp() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64
-}
-
-fn collect_chapter_ids(chapters: &[Chapter]) -> Vec<String> {
-    let mut ids = Vec::new();
-    for ch in chapters {
-        ids.push(ch.id.clone());
-        ids.extend(collect_chapter_ids(&ch.chapters));
-    }
-    ids
-}
-
-fn remove_chapter_from_list(chapters: &mut Vec<Chapter>, chapter_id: &str) -> bool {
-    if let Some(pos) = chapters.iter().position(|c| c.id == chapter_id) {
-        chapters.remove(pos);
-        return true;
-    }
-    for ch in chapters.iter_mut() {
-        if remove_chapter_from_list(&mut ch.chapters, chapter_id) {
-            return true;
-        }
-    }
-    false
-}
-
-fn find_parent<'a>(chapters: &'a mut [Chapter], target_id: &str) -> Option<&'a mut Vec<Chapter>> {
-    for ch in chapters.iter_mut() {
-        if ch.chapters.iter().any(|c| c.id == target_id) {
-            return Some(&mut ch.chapters);
-        }
-        if let Some(result) = find_parent(&mut ch.chapters, target_id) {
-            return Some(result);
-        }
-    }
-    None
-}
-
-fn find_chapter_mut<'a>(chapters: &'a mut [Chapter], id: &str) -> Option<&'a mut Chapter> {
-    for ch in chapters.iter_mut() {
-        if ch.id == id {
-            return Some(ch);
-        }
-        if let Some(found) = find_chapter_mut(&mut ch.chapters, id) {
-            return Some(found);
-        }
-    }
-    None
-}
-
 #[tauri::command]
 pub fn get_books_dir_info(_app_handle: tauri::AppHandle) -> Result<String, String> {
     let dir = default_books_dir();
@@ -273,7 +170,11 @@ pub fn set_books_dir(app_handle: tauri::AppHandle, dir: String) -> Result<String
     config["books_dir"] = serde_json::json!(dir);
     save_config(&app_handle, &config)?;
     fs::create_dir_all(&path).map_err(|e| format!("Failed to create directory: {}", e))?;
-    crate::logger::log_event(&app_handle, "set_books_dir", &format!("changed books directory to {}", dir));
+    crate::logger::log_event(
+        &app_handle,
+        "set_books_dir",
+        &format!("changed books directory to {}", dir),
+    );
     Ok("".to_string())
 }
 
@@ -286,7 +187,18 @@ fn validate_folder_name(name: &str) -> Result<(), String> {
     if name.trim().is_empty() {
         return Err("Folder name is empty".to_string());
     }
-    if name.contains(|c: char| c.is_ascii_control() || c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|') {
+    if name.contains(|c: char| {
+        c.is_ascii_control()
+            || c == '/'
+            || c == '\\'
+            || c == ':'
+            || c == '*'
+            || c == '?'
+            || c == '"'
+            || c == '<'
+            || c == '>'
+            || c == '|'
+    }) {
         return Err("Folder name contains invalid characters".to_string());
     }
     if name.starts_with('.') || name.ends_with('.') {
@@ -299,7 +211,12 @@ fn validate_folder_name(name: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn new_book(title: String, app_handle: tauri::AppHandle, book_dir: Option<String>, kind: Option<BookKind>) -> Result<BookInfo, String> {
+pub fn new_book(
+    title: String,
+    app_handle: tauri::AppHandle,
+    book_dir: Option<String>,
+    kind: Option<BookKind>,
+) -> Result<BookInfo, String> {
     let folder_name = slugify(&title);
     let book_path = match &book_dir {
         Some(dir) => {
@@ -316,8 +233,7 @@ pub fn new_book(title: String, app_handle: tauri::AppHandle, book_dir: Option<St
         return Err(format!("Book '{}' already exists", title));
     }
 
-    fs::create_dir_all(&book_path)
-        .map_err(|e| format!("Failed to create book directory: {}", e))?;
+    let path_str = book_path.to_string_lossy().to_string();
 
     let now = current_timestamp();
     let kind = kind.unwrap_or_default();
@@ -330,19 +246,29 @@ pub fn new_book(title: String, app_handle: tauri::AppHandle, book_dir: Option<St
         chapters: vec![],
     };
 
-    let meta_content =
-        serde_yaml::to_string(&meta).map_err(|e| format!("Failed to serialize meta: {}", e))?;
-    fs::write(book_path.join(META_FILE), &meta_content)
-        .map_err(|e| format!("Failed to write meta file: {}", e))?;
+    with_book_lock(&path_str, || {
+        fs::create_dir_all(&book_path).map_err(|e| crate::error::io_error("Failed to create book directory", e))?;
 
-    fs::create_dir_all(book_path.join(CHAPTERS_DIR))
-        .map_err(|e| format!("Failed to create chapters dir: {}", e))?;
+        let meta_content = serde_yaml::to_string(&meta)
+            .map_err(|e| AppError::new("E_META", "Failed to serialize meta").with_detail(e.to_string()))?;
+        fs::write(book_path.join(META_FILE), &meta_content)
+            .map_err(|e| crate::error::io_error("Failed to write meta file", e))?;
 
-    if let Err(e) = git::git_init(&book_path.to_string_lossy()) {
-        eprintln!("Warning: git init failed: {}", e);
+        fs::create_dir_all(book_path.join(CHAPTERS_DIR))
+            .map_err(|e| crate::error::io_error("Failed to create chapters dir", e))?;
+        Ok(())
+    })?;
+
+    // Git 初始化不再静默失败：失败时回滚刚创建的空书目录。
+    if let Err(error) = repo::git_init(&path_str) {
+        let _ = fs::remove_dir_all(&book_path);
+        return Err(error.to_string());
+    }
+    if let Err(error) = repo::initial_commit_if_identity(&path_str, &format!("chore: create book '{}'", title)) {
+        let _ = fs::remove_dir_all(&book_path);
+        return Err(error.to_string());
     }
 
-    let path_str = book_path.to_string_lossy().to_string();
     // 书已经落盘，登记失败不应让创建整体失败（默认目录会被 list_books 扫描到）
     if let Err(e) = add_to_book_list(&app_handle, &path_str) {
         eprintln!("Warning: failed to add book to config: {}", e);
@@ -361,23 +287,40 @@ pub fn new_book(title: String, app_handle: tauri::AppHandle, book_dir: Option<St
 
 #[tauri::command]
 pub fn delete_book(book_path: String, app_handle: tauri::AppHandle) -> Result<(), String> {
-    remove_from_book_list(&app_handle, &book_path)?;
-    let path = PathBuf::from(&book_path);
-    if path.exists() {
-        fs::remove_dir_all(&path).map_err(|e| format!("Failed to delete book: {}", e))?;
-    }
-    crate::logger::log_book_event(&app_handle, "delete_book", &format!("deleted '{}'", book_path), &book_path);
+    with_book_lock(&book_path, || {
+        remove_from_book_list(&app_handle, &book_path)
+            .map_err(|e| AppError::new("E_CONFIG", "Failed to update book list").with_detail(e))?;
+        let path = PathBuf::from(&book_path);
+        if path.exists() {
+            fs::remove_dir_all(&path).map_err(|e| crate::error::io_error("Failed to delete book", e))?;
+        }
+        Ok(())
+    })?;
+    crate::logger::log_book_event(
+        &app_handle,
+        "delete_book",
+        &format!("deleted '{}'", book_path),
+        &book_path,
+    );
     Ok(())
 }
 
 #[tauri::command]
 pub fn rename_book(book_path: String, new_title: String, app_handle: tauri::AppHandle) -> Result<BookInfo, String> {
-    let mut meta = load_meta(&book_path)?;
-    let old_title = meta.title.clone();
-    meta.title = new_title;
-    save_meta(&book_path, &meta)?;
+    let (meta, old_title) = with_book_lock(&book_path, || {
+        let mut meta = load_meta(&book_path)?;
+        let old_title = meta.title.clone();
+        meta.title = new_title.clone();
+        save_meta(&book_path, &meta)?;
+        Ok((meta, old_title))
+    })?;
 
-    crate::logger::log_book_event(&app_handle, "rename_book", &format!("renamed '{}' to '{}'", old_title, meta.title), &book_path);
+    crate::logger::log_book_event(
+        &app_handle,
+        "rename_book",
+        &format!("renamed '{}' to '{}'", old_title, meta.title),
+        &book_path,
+    );
 
     let path_str = PathBuf::from(&book_path).to_string_lossy().to_string();
     Ok(BookInfo {
@@ -391,20 +334,6 @@ pub fn rename_book(book_path: String, new_title: String, app_handle: tauri::AppH
 
 /// 校验日记本的条目结构：顶层章节必须带合法日期，且不再嵌套子章节。
 /// 同一天可以有多条，因此这里不再校验日期唯一。
-fn validate_diary_chapters(chapters: &[Chapter]) -> Result<(), String> {
-    for chapter in chapters {
-        let date = chapter
-            .date
-            .as_deref()
-            .ok_or_else(|| format!("Diary entry '{}' is missing date", chapter.title))?;
-        validate_date(date)?;
-        if !chapter.chapters.is_empty() {
-            return Err(format!("Diary entry '{}' must not have sub-chapters", date));
-        }
-    }
-    Ok(())
-}
-
 #[tauri::command]
 pub fn import_book(folder_path: String, app_handle: tauri::AppHandle) -> Result<BookInfo, String> {
     let path = PathBuf::from(&folder_path);
@@ -413,28 +342,42 @@ pub fn import_book(folder_path: String, app_handle: tauri::AppHandle) -> Result<
     }
     let meta_path = path.join(META_FILE);
     if !meta_path.exists() {
-        return Err(format!(
-            "No gfbook.yaml found in '{}'",
-            path.to_string_lossy()
-        ));
+        return Err(format!("No gfbook.yaml found in '{}'", path.to_string_lossy()));
     }
     let path_str = path.to_string_lossy().to_string();
-    let mut meta = load_meta(&path_str)?;
-    if meta.kind == BookKind::Diary {
-        validate_diary_chapters(&meta.chapters)?;
-        // 规范化：顶层条目按日期倒序、同一天按创建时间正序写回，保证外部导入后时间线顺序稳定
-        let sorted = {
-            let mut chapters = meta.chapters.clone();
-            sort_diary_entries(&mut chapters);
-            chapters
-        };
-        if sorted.iter().map(|c| &c.id).ne(meta.chapters.iter().map(|c| &c.id)) {
-            meta.chapters = sorted;
-            save_meta(&path_str, &meta)?;
-            meta.updated_time = current_timestamp();
+    let meta = with_book_lock(&path_str, || {
+        let mut meta = load_meta(&path_str)?;
+        if meta.kind == BookKind::Diary {
+            validate_diary_chapters(&meta.chapters)?;
+            // 规范化：顶层条目按日期倒序、同一天按创建时间正序写回，保证外部导入后时间线顺序稳定
+            let sorted = {
+                let mut chapters = meta.chapters.clone();
+                sort_diary_entries(&mut chapters);
+                chapters
+            };
+            if sorted.iter().map(|c| &c.id).ne(meta.chapters.iter().map(|c| &c.id)) {
+                meta.chapters = sorted;
+                save_meta(&path_str, &meta)?;
+                meta.updated_time = current_timestamp();
+            }
         }
+        Ok(meta)
+    })?;
+
+    // 导入的目录如果没有仓库，直接启用版本管理；失败要向上暴露。
+    if !repo::is_repo(&path_str) {
+        repo::git_init(&path_str)?;
+        repo::initial_commit_if_identity(&path_str, &format!("chore: import book '{}'", meta.title))?;
     }
+
     add_to_book_list(&app_handle, &path_str)?;
+    crate::logger::log_book_event(
+        &app_handle,
+        "import_book",
+        &format!("imported '{}'", meta.title),
+        &path_str,
+    );
+
     Ok(BookInfo {
         title: meta.title,
         path: path_str,
@@ -446,7 +389,7 @@ pub fn import_book(folder_path: String, app_handle: tauri::AppHandle) -> Result<
 
 #[tauri::command]
 pub fn get_book_meta(book_path: String) -> Result<BookMeta, String> {
-    load_meta(&book_path)
+    load_meta(&book_path).map_err(String::from)
 }
 
 // ═══════════════════════════════════════════
@@ -784,11 +727,7 @@ impl ImportAssets {
 }
 
 /// 改写 Markdown 图片语法 `![alt](src)` 中的 src
-fn rewrite_md_img_syntax(
-    tail: &str,
-    base_dir: &PathBuf,
-    assets: &mut ImportAssets,
-) -> Option<(String, usize)> {
+fn rewrite_md_img_syntax(tail: &str, base_dir: &PathBuf, assets: &mut ImportAssets) -> Option<(String, usize)> {
     let close_bracket = tail.find(']')?;
     if !tail[close_bracket + 1..].starts_with('(') {
         return None;
@@ -805,9 +744,7 @@ fn rewrite_md_img_syntax(
         let end = trimmed.find('>')?;
         (inner_start + leading + 1, inner_start + leading + end)
     } else {
-        let end = trimmed
-            .find(|c: char| c.is_whitespace())
-            .unwrap_or(trimmed.len());
+        let end = trimmed.find(|c: char| c.is_whitespace()).unwrap_or(trimmed.len());
         (inner_start + leading, inner_start + leading + end)
     };
     let href = &tail[href_start..href_end];
@@ -820,11 +757,7 @@ fn rewrite_md_img_syntax(
 }
 
 /// 改写 HTML `<img src="...">` 中的 src
-fn rewrite_html_img_tag(
-    tail: &str,
-    base_dir: &PathBuf,
-    assets: &mut ImportAssets,
-) -> Option<(String, usize)> {
+fn rewrite_html_img_tag(tail: &str, base_dir: &PathBuf, assets: &mut ImportAssets) -> Option<(String, usize)> {
     let gt = tail.find('>')?;
     let tag = &tail[..gt];
     let src_pos = tag.to_lowercase().find("src=")?;
@@ -894,8 +827,7 @@ fn rewrite_md_images(content: &str, base_dir: &PathBuf, assets: &mut ImportAsset
 fn write_imported_chapter(book_path: &PathBuf, id: &str, content: &str) -> Result<(), String> {
     let dir = book_path.join(CHAPTERS_DIR);
     fs::create_dir_all(&dir).map_err(|e| format!("Failed to create chapters dir: {}", e))?;
-    fs::write(dir.join(format!("{}.md", id)), content)
-        .map_err(|e| format!("Failed to write chapter: {}", e))
+    fs::write(dir.join(format!("{}.md", id)), content).map_err(|e| format!("Failed to write chapter: {}", e))
 }
 
 fn make_chapter_from_file(
@@ -905,8 +837,7 @@ fn make_chapter_from_file(
     now: u64,
     assets: &mut ImportAssets,
 ) -> Result<Chapter, String> {
-    let raw = fs::read_to_string(file)
-        .map_err(|e| format!("Failed to read {}: {}", file.display(), e))?;
+    let raw = fs::read_to_string(file).map_err(|e| format!("Failed to read {}: {}", file.display(), e))?;
     let stem = file
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
@@ -1034,49 +965,54 @@ pub fn import_markdown_dir(
         return Err(format!("书库中已存在同名目录：{}", slug));
     }
 
-    fs::create_dir_all(book_path.join(CHAPTERS_DIR))
-        .map_err(|e| format!("Failed to create chapters dir: {}", e))?;
-    fs::create_dir_all(book_path.join("assets"))
-        .map_err(|e| format!("Failed to create assets dir: {}", e))?;
-
-    let now = current_timestamp();
-    let mut assets = ImportAssets::new(&src, &book_path.join("assets"));
-
-    // 导入中途失败时清理半成品目录，便于用户修正后重试
-    let mut build_book = || -> Result<(), String> {
-        let chapters = import_markdown_tree(&book_path, &src, true, now, &mut assets)?;
-        let meta = BookMeta {
-            title: book_title.clone(),
-            schema_version: 1,
-            kind: BookKind::Book,
-            created_time: now,
-            updated_time: now,
-            chapters,
-        };
-        let meta_content =
-            serde_yaml::to_string(&meta).map_err(|e| format!("Failed to serialize meta: {}", e))?;
-        fs::write(book_path.join(META_FILE), &meta_content)
-            .map_err(|e| format!("Failed to write meta file: {}", e))?;
-        Ok(())
-    };
-    if let Err(error) = build_book() {
-        fs::remove_dir_all(&book_path).ok();
-        return Err(error);
-    }
-
-    if let Err(e) = git::git_init(&book_path.to_string_lossy()) {
-        eprintln!("Warning: git init failed: {}", e);
-    }
-
     let path_str = book_path.to_string_lossy().to_string();
+    let now = current_timestamp();
+
+    with_book_lock(&path_str, || {
+        fs::create_dir_all(book_path.join(CHAPTERS_DIR))
+            .map_err(|e| crate::error::io_error("Failed to create chapters dir", e))?;
+        fs::create_dir_all(book_path.join("assets"))
+            .map_err(|e| crate::error::io_error("Failed to create assets dir", e))?;
+
+        let mut assets = ImportAssets::new(&src, &book_path.join("assets"));
+
+        // 导入中途失败时清理半成品目录，便于用户修正后重试
+        let mut build_book = || -> Result<(), String> {
+            let chapters = import_markdown_tree(&book_path, &src, true, now, &mut assets)?;
+            let meta = BookMeta {
+                title: book_title.clone(),
+                schema_version: 1,
+                kind: BookKind::Book,
+                created_time: now,
+                updated_time: now,
+                chapters,
+            };
+            let meta_content = serde_yaml::to_string(&meta).map_err(|e| format!("Failed to serialize meta: {}", e))?;
+            fs::write(book_path.join(META_FILE), &meta_content)
+                .map_err(|e| format!("Failed to write meta file: {}", e))?;
+            Ok(())
+        };
+        if let Err(error) = build_book() {
+            fs::remove_dir_all(&book_path).ok();
+            return Err(AppError::new("E_IMPORT", "Failed to import markdown").with_detail(error));
+        }
+        Ok(())
+    })?;
+
+    if let Err(error) = repo::git_init(&path_str) {
+        fs::remove_dir_all(&book_path).ok();
+        return Err(error.to_string());
+    }
+    if let Err(error) = repo::initial_commit_if_identity(&path_str, &format!("chore: import book '{}'", book_title)) {
+        fs::remove_dir_all(&book_path).ok();
+        return Err(error.to_string());
+    }
+
     add_to_book_list(&app_handle, &path_str)?;
     crate::logger::log_book_event(
         &app_handle,
         "import_markdown",
-        &format!(
-            "imported {} markdown files from {}",
-            scan.md_count, source_path
-        ),
+        &format!("imported {} markdown files from {}", scan.md_count, source_path),
         &path_str,
     );
 
@@ -1091,27 +1027,21 @@ pub fn import_markdown_dir(
 
 #[tauri::command]
 pub fn read_chapter(book_path: String, chapter_id: String) -> Result<String, String> {
-    let file_path = chapter_file_path(&book_path, &chapter_id);
-    if !file_path.exists() {
-        return Ok(String::new());
-    }
-    fs::read_to_string(&file_path).map_err(|e| format!("Failed to read chapter: {}", e))
+    read_chapter_file(&book_path, &chapter_id).map_err(String::from)
 }
 
 #[tauri::command]
 pub fn write_chapter(book_path: String, chapter_id: String, content: String) -> Result<(), String> {
-    let file_path = chapter_file_path(&book_path, &chapter_id);
-    fs::create_dir_all(file_path.parent().unwrap())
-        .map_err(|e| format!("Failed to create chapters dir: {}", e))?;
-    fs::write(&file_path, &content).map_err(|e| format!("Failed to write chapter: {}", e))?;
+    with_book_lock(&book_path, || {
+        write_chapter_file(&book_path, &chapter_id, &content)?;
 
-    let mut meta = load_meta(&book_path)?;
-    if let Some(chapter) = find_chapter_mut(&mut meta.chapters, &chapter_id) {
-        chapter.updated_time = current_timestamp();
-    }
-    save_meta(&book_path, &meta)?;
-
-    Ok(())
+        let mut meta = load_meta(&book_path)?;
+        if let Some(chapter) = crate::book_fs::find_chapter_mut(&mut meta.chapters, &chapter_id) {
+            chapter.updated_time = current_timestamp();
+        }
+        save_meta(&book_path, &meta)
+    })
+    .map_err(String::from)
 }
 
 #[tauri::command]
@@ -1121,133 +1051,73 @@ pub fn new_chapter(
     title: String,
     app_handle: tauri::AppHandle,
 ) -> Result<Chapter, String> {
-    let now = current_timestamp();
-    let id = Uuid::new_v4().to_string();
-    let chapter = Chapter {
-        id: id.clone(),
-        title: title.clone(),
-        created_time: now,
-        updated_time: now,
-        date: None,
-        chapters: vec![],
-    };
+    let title_for_log = title.clone();
+    let chapter = with_book_lock(&book_path, || {
+        let now = current_timestamp();
+        let id = Uuid::new_v4().to_string();
+        let chapter = Chapter {
+            id: id.clone(),
+            title: title.clone(),
+            created_time: now,
+            updated_time: now,
+            date: None,
+            chapters: vec![],
+        };
 
-    let mut meta = load_meta(&book_path)?;
-
-    if let Some(pid) = &parent_id {
-        if let Some(parent) = find_chapter_mut(&mut meta.chapters, pid) {
-            parent.chapters.push(chapter.clone());
+        let mut meta = load_meta(&book_path)?;
+        if let Some(pid) = &parent_id {
+            if let Some(parent) = crate::book_fs::find_chapter_mut(&mut meta.chapters, pid) {
+                parent.chapters.push(chapter.clone());
+            } else {
+                return Err(AppError::new("E_NOT_FOUND", "Parent chapter not found"));
+            }
         } else {
-            return Err("Parent chapter not found".to_string());
+            meta.chapters.push(chapter.clone());
         }
-    } else {
-        meta.chapters.push(chapter.clone());
-    }
+        save_meta(&book_path, &meta)?;
 
-    save_meta(&book_path, &meta)?;
+        create_chapter_file(&book_path, &id, &title)?;
+        Ok(chapter)
+    })?;
 
-    let content = format!("# {}\n", title);
-    let file_path = chapter_file_path(&book_path, &id);
-    fs::create_dir_all(file_path.parent().unwrap())
-        .map_err(|e| format!("Failed to create chapters dir: {}", e))?;
-    fs::write(&file_path, &content).map_err(|e| format!("Failed to write chapter file: {}", e))?;
-
-    crate::logger::log_book_event(&app_handle, "create_chapter", &format!("created '{}'", title), &book_path);
+    crate::logger::log_book_event(
+        &app_handle,
+        "create_chapter",
+        &format!("created '{}'", title_for_log),
+        &book_path,
+    );
 
     Ok(chapter)
 }
 
-/// 校验 `YYYY-MM-DD` 形式的日期。
-fn validate_date(date: &str) -> Result<(), String> {
-    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
-        .map(|_| ())
-        .map_err(|_| format!("Invalid date '{}', expected YYYY-MM-DD", date))
-}
-
-/// 日记条目排序：日期倒序；同一天内按创建时间正序。
-fn sort_diary_entries(chapters: &mut [Chapter]) {
-    chapters.sort_by(|a, b| {
-        b.date
-            .cmp(&a.date)
-            .then_with(|| a.created_time.cmp(&b.created_time))
-    });
-}
-
-/// 把正文首行的标题替换为新标题（仅当它等于候选值之一）
-fn replace_leading_heading(
-    content: &str,
-    candidates: &[&str],
-    new_title: &str,
-) -> Option<String> {
-    let mut lines = content.lines();
-    let first = lines.next()?.trim_end();
-    if !candidates.iter().any(|c| first == format!("# {}", c)) {
-        return None;
-    }
-    let mut rest: Vec<&str> = lines.collect();
-    while rest.last().is_some_and(|line| line.trim().is_empty()) {
-        rest.pop();
-    }
-    let mut out = format!("# {}", new_title);
-    if !rest.is_empty() {
-        out.push('\n');
-        out.push_str(&rest.join("\n"));
-    }
-    out.push('\n');
-    Some(out)
-}
-
-/// 日记条目的标题已变化时，同步正文首行，避免正文与列表显示不一致
-fn sync_entry_heading(
-    book_path: &str,
-    chapter_id: &str,
-    candidates: &[&str],
-    new_title: &str,
-) {
-    let path = chapter_file_path(book_path, chapter_id);
-    let Ok(content) = fs::read_to_string(&path) else {
-        return;
-    };
-    if let Some(updated) = replace_leading_heading(&content, candidates, new_title) {
-        if let Err(e) = fs::write(&path, &updated) {
-            eprintln!("Warning: failed to update diary entry heading: {}", e);
-        }
-    }
-}
-
 /// 在日记本中新建某一天的条目；同一天允许多条。
 #[tauri::command]
-pub fn new_diary_entry(
-    book_path: String,
-    date: String,
-    app_handle: tauri::AppHandle,
-) -> Result<Chapter, String> {
+pub fn new_diary_entry(book_path: String, date: String, app_handle: tauri::AppHandle) -> Result<Chapter, String> {
     validate_date(&date)?;
 
-    let mut meta = load_meta(&book_path)?;
-    if meta.kind != BookKind::Diary {
-        return Err("Book is not a diary".to_string());
-    }
+    let chapter = with_book_lock(&book_path, || {
+        let mut meta = load_meta(&book_path)?;
+        if meta.kind != BookKind::Diary {
+            return Err(AppError::new("E_NOT_DIARY", "Book is not a diary"));
+        }
 
-    let now = current_timestamp();
-    let id = Uuid::new_v4().to_string();
-    let chapter = Chapter {
-        id: id.clone(),
-        title: date.clone(),
-        created_time: now,
-        updated_time: now,
-        date: Some(date.clone()),
-        chapters: vec![],
-    };
-    meta.chapters.push(chapter.clone());
-    sort_diary_entries(&mut meta.chapters);
-    save_meta(&book_path, &meta)?;
+        let now = current_timestamp();
+        let id = Uuid::new_v4().to_string();
+        let chapter = Chapter {
+            id: id.clone(),
+            title: date.clone(),
+            created_time: now,
+            updated_time: now,
+            date: Some(date.clone()),
+            chapters: vec![],
+        };
+        meta.chapters.push(chapter.clone());
+        sort_diary_entries(&mut meta.chapters);
+        save_meta(&book_path, &meta)?;
 
-    let content = format!("# {}\n", date);
-    let file_path = chapter_file_path(&book_path, &id);
-    fs::create_dir_all(file_path.parent().unwrap())
-        .map_err(|e| format!("Failed to create chapters dir: {}", e))?;
-    fs::write(&file_path, &content).map_err(|e| format!("Failed to write diary entry: {}", e))?;
+        create_chapter_file(&book_path, &id, &date)?;
+        Ok(chapter)
+    })?;
 
     crate::logger::log_book_event(
         &app_handle,
@@ -1271,22 +1141,26 @@ pub fn rename_diary_entry(
     if title.is_empty() {
         return Err("Title cannot be empty".to_string());
     }
-    let mut meta = load_meta(&book_path)?;
-    if meta.kind != BookKind::Diary {
-        return Err("Book is not a diary".to_string());
-    }
 
-    let (old_title, old_date, chapter) = {
-        let chapter = find_chapter_mut(&mut meta.chapters, &chapter_id)
-            .ok_or_else(|| "Diary entry not found".to_string())?;
-        let old_title = chapter.title.clone();
-        let old_date = chapter.date.clone().unwrap_or_default();
-        chapter.title = title.clone();
-        chapter.updated_time = current_timestamp();
-        (old_title, old_date, chapter.clone())
-    };
-    save_meta(&book_path, &meta)?;
-    sync_entry_heading(&book_path, &chapter_id, &[&old_title, &old_date], &title);
+    let chapter = with_book_lock(&book_path, || {
+        let mut meta = load_meta(&book_path)?;
+        if meta.kind != BookKind::Diary {
+            return Err(AppError::new("E_NOT_DIARY", "Book is not a diary"));
+        }
+
+        let (old_title, old_date, chapter) = {
+            let chapter = crate::book_fs::find_chapter_mut(&mut meta.chapters, &chapter_id)
+                .ok_or_else(|| AppError::new("E_NOT_FOUND", "Diary entry not found"))?;
+            let old_title = chapter.title.clone();
+            let old_date = chapter.date.clone().unwrap_or_default();
+            chapter.title = title.clone();
+            chapter.updated_time = current_timestamp();
+            (old_title, old_date, chapter.clone())
+        };
+        save_meta(&book_path, &meta)?;
+        sync_entry_heading(&book_path, &chapter_id, &[&old_title, &old_date], &title)?;
+        Ok(chapter)
+    })?;
 
     crate::logger::log_book_event(
         &app_handle,
@@ -1307,31 +1181,29 @@ pub fn update_diary_date(
 ) -> Result<Chapter, String> {
     validate_date(&date)?;
 
-    let mut meta = load_meta(&book_path)?;
-    if meta.kind != BookKind::Diary {
-        return Err("Book is not a diary".to_string());
-    }
-
-    let (old_title, old_date, chapter) = {
-        let chapter = find_chapter_mut(&mut meta.chapters, &chapter_id)
-            .ok_or_else(|| "Diary entry not found".to_string())?;
-        let old_title = chapter.title.clone();
-        let old_date = chapter.date.clone().unwrap_or_default();
-        if old_title == old_date {
-            chapter.title = date.clone();
+    let chapter = with_book_lock(&book_path, || {
+        let mut meta = load_meta(&book_path)?;
+        if meta.kind != BookKind::Diary {
+            return Err(AppError::new("E_NOT_DIARY", "Book is not a diary"));
         }
-        chapter.date = Some(date.clone());
-        chapter.updated_time = current_timestamp();
-        (old_title, old_date, chapter.clone())
-    };
-    sort_diary_entries(&mut meta.chapters);
-    save_meta(&book_path, &meta)?;
-    sync_entry_heading(
-        &book_path,
-        &chapter_id,
-        &[&old_title, &old_date],
-        &chapter.title,
-    );
+
+        let (old_title, old_date, chapter) = {
+            let chapter = crate::book_fs::find_chapter_mut(&mut meta.chapters, &chapter_id)
+                .ok_or_else(|| AppError::new("E_NOT_FOUND", "Diary entry not found"))?;
+            let old_title = chapter.title.clone();
+            let old_date = chapter.date.clone().unwrap_or_default();
+            if old_title == old_date {
+                chapter.title = date.clone();
+            }
+            chapter.date = Some(date.clone());
+            chapter.updated_time = current_timestamp();
+            (old_title, old_date, chapter.clone())
+        };
+        sort_diary_entries(&mut meta.chapters);
+        save_meta(&book_path, &meta)?;
+        sync_entry_heading(&book_path, &chapter_id, &[&old_title, &old_date], &chapter.title)?;
+        Ok(chapter)
+    })?;
 
     crate::logger::log_book_event(
         &app_handle,
@@ -1344,47 +1216,46 @@ pub fn update_diary_date(
 
 #[tauri::command]
 pub fn delete_chapter(book_path: String, chapter_id: String, app_handle: tauri::AppHandle) -> Result<(), String> {
-    let mut meta = load_meta(&book_path)?;
-
-    let ids_to_delete = {
-        let mut ids = Vec::new();
-        if let Some(ch) = find_chapter_mut(&mut meta.chapters, &chapter_id) {
-            ids.push(chapter_id.clone());
-            ids.extend(collect_chapter_ids(&ch.chapters));
+    with_book_lock(&book_path, || {
+        let mut meta = load_meta(&book_path)?;
+        let ids_to_delete = remove_chapter_tree(&mut meta.chapters, &chapter_id)?;
+        for id in &ids_to_delete {
+            delete_chapter_file(&book_path, id)?;
         }
-        ids
-    };
+        save_meta(&book_path, &meta)
+    })?;
 
-    if ids_to_delete.is_empty() {
-        return Err("Chapter not found".to_string());
-    }
-
-    for id in &ids_to_delete {
-        let file_path = chapter_file_path(&book_path, id);
-        if file_path.exists() {
-            let _ = fs::remove_file(&file_path);
-        }
-    }
-
-    remove_chapter_from_list(&mut meta.chapters, &chapter_id);
-    save_meta(&book_path, &meta)?;
-
-    crate::logger::log_book_event(&app_handle, "delete_chapter", &format!("deleted chapter {}", chapter_id), &book_path);
+    crate::logger::log_book_event(
+        &app_handle,
+        "delete_chapter",
+        &format!("deleted chapter {}", chapter_id),
+        &book_path,
+    );
 
     Ok(())
 }
 
 #[tauri::command]
-pub fn rename_chapter(book_path: String, chapter_id: String, new_title: String, app_handle: tauri::AppHandle) -> Result<(), String> {
-    let mut meta = load_meta(&book_path)?;
-    if let Some(chapter) = find_chapter_mut(&mut meta.chapters, &chapter_id) {
+pub fn rename_chapter(
+    book_path: String,
+    chapter_id: String,
+    new_title: String,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    with_book_lock(&book_path, || {
+        let mut meta = load_meta(&book_path)?;
+        let chapter = crate::book_fs::find_chapter_mut(&mut meta.chapters, &chapter_id)
+            .ok_or_else(|| AppError::new("E_NOT_FOUND", "Chapter not found"))?;
         chapter.title = new_title;
         chapter.updated_time = current_timestamp();
-    } else {
-        return Err("Chapter not found".to_string());
-    }
-    save_meta(&book_path, &meta)?;
-    crate::logger::log_book_event(&app_handle, "rename_chapter", &format!("renamed chapter {}", chapter_id), &book_path);
+        save_meta(&book_path, &meta)
+    })?;
+    crate::logger::log_book_event(
+        &app_handle,
+        "rename_chapter",
+        &format!("renamed chapter {}", chapter_id),
+        &book_path,
+    );
     Ok(())
 }
 
@@ -1395,150 +1266,70 @@ pub fn move_chapter(
     target_id: Option<String>,
     position: String,
 ) -> Result<(), String> {
-    let mut meta = load_meta(&book_path)?;
-
-    let chapter = {
-        let mut found = None;
-        if let Some(ch) = find_chapter_mut(&mut meta.chapters, &chapter_id) {
-            found = Some(ch.clone());
-        }
-        found.ok_or_else(|| "Chapter not found".to_string())?
-    };
-
-    remove_chapter_from_list(&mut meta.chapters, &chapter_id);
-
-    match position.as_str() {
-        "before" | "after" => {
-            let insert_before = position == "before";
-            if let Some(tid) = &target_id {
-                let (sibling_list, sibling_idx) =
-                    find_sibling_list_and_index(&mut meta.chapters, tid)
-                        .ok_or_else(|| "Target chapter not found".to_string())?;
-                let idx = if insert_before {
-                    sibling_idx
-                } else {
-                    sibling_idx + 1
-                };
-                sibling_list.insert(idx.min(sibling_list.len()), chapter);
-            } else {
-                if insert_before {
-                    meta.chapters.insert(0, chapter);
-                } else {
-                    meta.chapters.push(chapter);
-                }
-            }
-        }
-        _ => {
-            // default: "inner"
-            if let Some(tid) = &target_id {
-                if let Some(parent) = find_chapter_mut(&mut meta.chapters, tid) {
-                    parent.chapters.push(chapter);
-                } else {
-                    return Err("Target chapter not found".to_string());
-                }
-            } else {
-                meta.chapters.push(chapter);
-            }
-        }
-    }
-
-    save_meta(&book_path, &meta)?;
-    Ok(())
-}
-
-fn find_sibling_list_and_index<'a>(
-    chapters: &'a mut Vec<Chapter>,
-    target_id: &str,
-) -> Option<(&'a mut Vec<Chapter>, usize)> {
-    if let Some(idx) = chapters.iter().position(|c| c.id == target_id) {
-        return Some((chapters, idx));
-    }
-    for ch in chapters.iter_mut() {
-        if let Some(result) = find_sibling_list_and_index(&mut ch.chapters, target_id) {
-            return Some(result);
-        }
-    }
-    None
+    with_book_lock(&book_path, || {
+        let mut meta = load_meta(&book_path)?;
+        move_chapter_in_tree(&mut meta.chapters, &chapter_id, target_id.as_deref(), &position)?;
+        save_meta(&book_path, &meta)
+    })
+    .map_err(String::from)
 }
 
 #[tauri::command]
 pub fn move_chapter_up(book_path: String, chapter_id: String) -> Result<(), String> {
-    let mut meta = load_meta(&book_path)?;
-
-    let chapters_list = if let Some(parent) = find_parent(&mut meta.chapters, &chapter_id) {
-        parent
-    } else {
-        &mut meta.chapters
-    };
-
-    let pos = chapters_list.iter().position(|c| c.id == chapter_id);
-    if let Some(pos) = pos {
-        if pos > 0 {
-            chapters_list.swap(pos, pos - 1);
-        }
-    }
-
-    save_meta(&book_path, &meta)?;
-    Ok(())
+    with_book_lock(&book_path, || {
+        let mut meta = load_meta(&book_path)?;
+        move_chapter_up_in_tree(&mut meta.chapters, &chapter_id)?;
+        save_meta(&book_path, &meta)
+    })
+    .map_err(String::from)
 }
 
 #[tauri::command]
 pub fn move_chapter_down(book_path: String, chapter_id: String) -> Result<(), String> {
-    let mut meta = load_meta(&book_path)?;
-
-    let chapters_list = if let Some(parent) = find_parent(&mut meta.chapters, &chapter_id) {
-        parent
-    } else {
-        &mut meta.chapters
-    };
-
-    let pos = chapters_list.iter().position(|c| c.id == chapter_id);
-    if let Some(pos) = pos {
-        if pos < chapters_list.len() - 1 {
-            chapters_list.swap(pos, pos + 1);
-        }
-    }
-
-    save_meta(&book_path, &meta)?;
-    Ok(())
+    with_book_lock(&book_path, || {
+        let mut meta = load_meta(&book_path)?;
+        move_chapter_down_in_tree(&mut meta.chapters, &chapter_id)?;
+        save_meta(&book_path, &meta)
+    })
+    .map_err(String::from)
 }
-
 
 #[tauri::command]
 pub fn git_status(book_path: String) -> Result<String, String> {
-    git::git_status(&book_path)
+    repo::git_status(&book_path).map_err(String::from)
 }
 
 #[tauri::command]
 pub fn git_commit(book_path: String, message: String, app_handle: tauri::AppHandle) -> Result<(), String> {
-    git::git_commit(&book_path, &message)?;
+    with_book_lock(&book_path, || repo::git_commit(&book_path, &message))?;
     crate::logger::log_book_event(&app_handle, "commit", &format!("committed: {}", message), &book_path);
     Ok(())
 }
 
 #[tauri::command]
 pub fn git_log(book_path: String, max_count: Option<u32>) -> Result<Vec<CommitInfo>, String> {
-    git::git_log(&book_path, max_count.unwrap_or(20))
+    repo::git_log(&book_path, max_count.unwrap_or(20)).map_err(String::from)
 }
 
 #[tauri::command]
 pub fn git_remote_url(book_path: String) -> Result<Option<String>, String> {
-    git::git_remote_url(&book_path)
+    repo::git_remote_url(&book_path).map_err(String::from)
 }
 
 #[tauri::command]
 pub fn git_remote_set_url(book_path: String, url: String, app_handle: tauri::AppHandle) -> Result<(), String> {
-    git::git_remote_set_url(&book_path, &url)?;
-    crate::logger::log_book_event(&app_handle, "set_remote_url", &format!("set remote url to {}", url), &book_path);
+    repo::git_remote_set_url(&book_path, &url)?;
+    crate::logger::log_book_event(
+        &app_handle,
+        "set_remote_url",
+        &format!("set remote url to {}", url),
+        &book_path,
+    );
     Ok(())
 }
 
-fn run_git_and_emit<F>(
-    app_handle: tauri::AppHandle,
-    op_type: &'static str,
-    book_path: String,
-    f: F,
-) where
+fn run_git_and_emit<F>(app_handle: tauri::AppHandle, op_type: &'static str, book_path: String, f: F)
+where
     F: FnOnce() -> Result<String, String> + Send + 'static,
 {
     crate::logger::log_book_event(&app_handle, op_type, "started", &book_path);
@@ -1553,11 +1344,17 @@ fn run_git_and_emit<F>(
             match rx.recv_timeout(std::time::Duration::from_secs(30)) {
                 Ok(Ok(msg)) => {
                     crate::logger::log_book_event(&app_handle, op_type, &format!("ok: {}", msg), &book_path_clone);
-                    let _ = app_handle.emit("git:done", serde_json::json!({"type": op_type, "ok": true, "message": msg, "book_path": book_path_clone}));
+                    let _ = app_handle.emit(
+                        "git:done",
+                        serde_json::json!({"type": op_type, "ok": true, "message": msg, "book_path": book_path_clone}),
+                    );
                 }
                 Ok(Err(e)) => {
                     crate::logger::log_book_event(&app_handle, op_type, &format!("failed: {}", e), &book_path_clone);
-                    let _ = app_handle.emit("git:done", serde_json::json!({"type": op_type, "ok": false, "message": e, "book_path": book_path_clone}));
+                    let _ = app_handle.emit(
+                        "git:done",
+                        serde_json::json!({"type": op_type, "ok": false, "message": e, "book_path": book_path_clone}),
+                    );
                 }
                 Err(_) => {
                     crate::logger::log_book_event(&app_handle, op_type, "timed out (30s)", &book_path_clone);
@@ -1577,7 +1374,7 @@ fn run_git_and_emit<F>(
 pub fn git_fetch(book_path: String, app_handle: tauri::AppHandle) -> Result<String, String> {
     let bp = book_path.clone();
     run_git_and_emit(app_handle, "fetch", book_path, move || {
-        git::git_fetch(&bp)
+        repo::git_fetch(&bp).map_err(String::from)
     });
     Ok("started".to_string())
 }
@@ -1585,28 +1382,104 @@ pub fn git_fetch(book_path: String, app_handle: tauri::AppHandle) -> Result<Stri
 #[tauri::command]
 pub fn git_pull(book_path: String, app_handle: tauri::AppHandle) -> Result<String, String> {
     let bp = book_path.clone();
-    run_git_and_emit(app_handle, "pull", book_path, move || git::git_pull(&bp));
+    run_git_and_emit(app_handle, "pull", book_path, move || {
+        with_book_lock(&bp, || repo::git_pull(&bp)).map_err(String::from)
+    });
     Ok("started".to_string())
 }
 
 #[tauri::command]
 pub fn git_push(book_path: String, app_handle: tauri::AppHandle) -> Result<String, String> {
     let bp = book_path.clone();
-    run_git_and_emit(app_handle, "push", book_path, move || git::git_push(&bp));
+    run_git_and_emit(app_handle, "push", book_path, move || {
+        repo::git_push(&bp).map_err(String::from)
+    });
     Ok("started".to_string())
 }
 
 #[tauri::command]
 pub fn git_ahead_behind(book_path: String) -> Result<(u32, u32), String> {
-    git::git_ahead_behind(&book_path)
+    repo::git_ahead_behind(&book_path).map_err(String::from)
+}
+
+#[tauri::command]
+pub fn get_repo_state(book_path: String) -> Result<RepoState, AppError> {
+    repo::repo_state(&book_path)
+}
+
+#[tauri::command]
+pub fn get_book_identity(book_path: String) -> Result<BookIdentity, AppError> {
+    repo::get_book_identity(&book_path)
+}
+
+#[tauri::command]
+pub fn set_book_identity(
+    book_path: String,
+    name: String,
+    email: String,
+    app_handle: tauri::AppHandle,
+) -> Result<(), AppError> {
+    repo::set_book_identity(&book_path, &name, &email)?;
+    let detail = if name.trim().is_empty() {
+        "cleared book git identity".to_string()
+    } else {
+        format!("set book git identity: {} <{}>", name.trim(), email.trim())
+    };
+    crate::logger::log_book_event(&app_handle, "set_book_identity", &detail, &book_path);
+    Ok(())
+}
+
+/// 合并提交历史与应用事件，按时间倒序返回，供「操作记录」使用。
+#[tauri::command]
+pub fn get_book_activity(
+    book_path: String,
+    limit: Option<u32>,
+    app_handle: tauri::AppHandle,
+) -> Result<Vec<ActivityItem>, AppError> {
+    let limit = limit.unwrap_or(50).clamp(1, 500);
+    let mut items = Vec::new();
+
+    if repo::is_repo(&book_path) {
+        for commit in repo::git_log(&book_path, limit.saturating_mul(2)).unwrap_or_default() {
+            items.push(ActivityItem::Commit {
+                hash: commit.hash,
+                short_hash: commit.short_hash,
+                message: commit.message,
+                author: commit.author,
+                email: commit.email,
+                timestamp: commit.timestamp,
+            });
+        }
+    }
+
+    let events = crate::logger::read_book_logs(&app_handle, (limit * 4) as usize, &book_path);
+    for value in events {
+        let timestamp = value
+            .get("t")
+            .and_then(|v| v.as_str())
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .map(|time| time.timestamp().max(0) as u64)
+            .unwrap_or(0);
+        items.push(ActivityItem::Event {
+            timestamp,
+            event: value.get("e").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            detail: value.get("d").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            result: value.get("r").and_then(|v| v.as_str()).unwrap_or("ok").to_string(),
+            code: value.get("c").and_then(|v| v.as_str()).map(|v| v.to_string()),
+        });
+    }
+
+    items.sort_by_key(|item| match item {
+        ActivityItem::Commit { timestamp, .. } | ActivityItem::Event { timestamp, .. } => std::cmp::Reverse(*timestamp),
+    });
+    items.truncate(limit as usize);
+    Ok(items)
 }
 
 #[tauri::command]
 pub fn read_file_base64(path: String) -> Result<String, String> {
     let p = PathBuf::from(&path);
-    let canonical = p
-        .canonicalize()
-        .map_err(|e| format!("Invalid path: {}", e))?;
+    let canonical = p.canonicalize().map_err(|e| format!("Invalid path: {}", e))?;
     let home = std::env::var("HOME")
         .ok()
         .map(PathBuf::from)
@@ -1634,7 +1507,6 @@ pub fn get_asset_url(book_path: String, rel_path: String) -> Result<String, Stri
 }
 
 fn base64_encode(data: &[u8]) -> String {
-    use std::fmt::Write;
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut result = String::new();
     for chunk in data.chunks(3) {
@@ -1695,15 +1567,17 @@ pub fn reveal_in_finder(path: String) -> Result<(), String> {
 #[tauri::command]
 pub fn download_image_url(book_path: String, url: String, app_handle: tauri::AppHandle) -> Result<String, String> {
     let assets_dir = PathBuf::from(&book_path).join("assets");
-    fs::create_dir_all(&assets_dir)
-        .map_err(|e| format!("Failed to create assets dir: {}", e))?;
+    fs::create_dir_all(&assets_dir).map_err(|e| format!("Failed to create assets dir: {}", e))?;
 
-    let response = reqwest::blocking::get(&url)
-        .map_err(|e| format!("Failed to download image: {}", e))?;
+    let response = reqwest::blocking::get(&url).map_err(|e| format!("Failed to download image: {}", e))?;
 
     // Determine extension from content-type or URL (before consuming response)
     let ext = {
-        let ct_hint = response.headers().get("content-type").and_then(|v| v.to_str().ok()).map(|s| s.to_string());
+        let ct_hint = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
         if let Some(ct) = ct_hint {
             match ct.as_str() {
                 s if s.contains("png") => "png".to_string(),
@@ -1733,15 +1607,24 @@ pub fn download_image_url(book_path: String, url: String, app_handle: tauri::App
     let dest = assets_dir.join(&filename);
     fs::write(&dest, &bytes).map_err(|e| format!("Failed to write image: {}", e))?;
 
-    crate::logger::log_book_event(&app_handle, "download_image", &format!("downloaded from {}", url), &book_path);
+    crate::logger::log_book_event(
+        &app_handle,
+        "download_image",
+        &format!("downloaded from {}", url),
+        &book_path,
+    );
     Ok(format!("assets/{}", filename))
 }
 
 #[tauri::command]
-pub fn save_image_data(book_path: String, data_base64: String, ext: String, app_handle: tauri::AppHandle) -> Result<String, String> {
+pub fn save_image_data(
+    book_path: String,
+    data_base64: String,
+    ext: String,
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
     let assets_dir = PathBuf::from(&book_path).join("assets");
-    fs::create_dir_all(&assets_dir)
-        .map_err(|e| format!("Failed to create assets dir: {}", e))?;
+    fs::create_dir_all(&assets_dir).map_err(|e| format!("Failed to create assets dir: {}", e))?;
 
     let filename = format!("{}.{}", Uuid::new_v4(), ext);
     let dest = assets_dir.join(&filename);
@@ -1749,7 +1632,12 @@ pub fn save_image_data(book_path: String, data_base64: String, ext: String, app_
     let bytes = base64_decode(&data_base64)?;
     fs::write(&dest, &bytes).map_err(|e| format!("Failed to write image: {}", e))?;
 
-    crate::logger::log_book_event(&app_handle, "paste_image", &format!("saved pasted image {}", filename), &book_path);
+    crate::logger::log_book_event(
+        &app_handle,
+        "paste_image",
+        &format!("saved pasted image {}", filename),
+        &book_path,
+    );
     Ok(format!("assets/{}", filename))
 }
 
@@ -1782,10 +1670,13 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
 }
 
 #[tauri::command]
-pub fn save_image_to_book(book_path: String, source_path: String, app_handle: tauri::AppHandle) -> Result<String, String> {
+pub fn save_image_to_book(
+    book_path: String,
+    source_path: String,
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
     let assets_dir = PathBuf::from(&book_path).join("assets");
-    fs::create_dir_all(&assets_dir)
-        .map_err(|e| format!("Failed to create assets dir: {}", e))?;
+    fs::create_dir_all(&assets_dir).map_err(|e| format!("Failed to create assets dir: {}", e))?;
 
     let ext = PathBuf::from(&source_path)
         .extension()
@@ -1795,51 +1686,64 @@ pub fn save_image_to_book(book_path: String, source_path: String, app_handle: ta
     let filename = format!("{}.{}", Uuid::new_v4(), ext);
     let dest = assets_dir.join(&filename);
 
-    fs::copy(&source_path, &dest)
-        .map_err(|e| format!("Failed to copy image: {}", e))?;
+    fs::copy(&source_path, &dest).map_err(|e| format!("Failed to copy image: {}", e))?;
 
-    crate::logger::log_book_event(&app_handle, "import_image", &format!("imported image {}", filename), &book_path);
+    crate::logger::log_book_event(
+        &app_handle,
+        "import_image",
+        &format!("imported image {}", filename),
+        &book_path,
+    );
     Ok(format!("assets/{}", filename))
 }
 
 #[tauri::command]
 pub fn git_get_proxy(book_path: String) -> Result<String, String> {
-    git::git_get_proxy(&book_path)
+    repo::git_get_proxy(&book_path).map_err(String::from)
 }
 
 #[tauri::command]
 pub fn git_set_proxy(book_path: String, proxy: String, app_handle: tauri::AppHandle) -> Result<(), String> {
-    git::git_set_proxy(&book_path, &proxy)?;
+    repo::git_set_proxy(&book_path, &proxy)?;
     crate::logger::log_book_event(&app_handle, "set_proxy", &format!("set proxy to {}", proxy), &book_path);
     Ok(())
 }
 
 #[tauri::command]
 pub fn git_user_config(book_path: String) -> Result<(String, String), String> {
-    git::git_user_config(&book_path)
+    repo::git_user_config(&book_path).map_err(String::from)
 }
 
 #[tauri::command]
-pub fn git_set_user_config(book_path: String, name: String, email: String, app_handle: tauri::AppHandle) -> Result<(), String> {
-    git::git_set_user_config(&book_path, &name, &email)?;
-    crate::logger::log_book_event(&app_handle, "set_git_config", &format!("set user: {} <{}>", name, email), &book_path);
+pub fn git_set_user_config(
+    book_path: String,
+    name: String,
+    email: String,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    repo::git_set_user_config(&book_path, &name, &email)?;
+    crate::logger::log_book_event(
+        &app_handle,
+        "set_git_config",
+        &format!("set user: {} <{}>", name, email),
+        &book_path,
+    );
     Ok(())
 }
 
 #[tauri::command]
 pub fn get_global_git_user() -> Result<(String, String), String> {
-    let config = git2::Config::open_default().map_err(|e| format!("Config error: {}", e))?;
-    let name = config.get_string("user.name").unwrap_or_default();
-    let email = config.get_string("user.email").unwrap_or_default();
-    Ok((name, email))
+    repo::global_user_config().map_err(String::from)
 }
 
 #[tauri::command]
 pub fn set_global_git_user(name: String, email: String, app_handle: tauri::AppHandle) -> Result<(), String> {
-    let mut config = git2::Config::open_default().map_err(|e| format!("Config error: {}", e))?;
-    config.set_str("user.name", &name).map_err(|e| format!("Failed to set user.name: {}", e))?;
-    config.set_str("user.email", &email).map_err(|e| format!("Failed to set user.email: {}", e))?;
-    crate::logger::log_event(&app_handle, "set_global_git_user", &format!("set git user: {} <{}>", name, email));
+    repo::set_global_user_config(&name, &email).map_err(String::from)?;
+    crate::logger::log_event(
+        &app_handle,
+        "set_global_git_user",
+        &format!("set git user: {} <{}>", name, email),
+    );
     Ok(())
 }
 
@@ -1855,34 +1759,31 @@ pub fn set_proxy_setting(app_handle: tauri::AppHandle, proxy: String) -> Result<
     if proxy.is_empty() {
         config.as_object_mut().map(|m| m.remove("proxy"));
         // Also remove from git global config
-        if let Ok(mut git_cfg) = git2::Config::open_default() {
-            let _ = git_cfg.remove("http.proxy");
-        }
+        let _ = repo::set_global_proxy("");
     } else {
         config["proxy"] = serde_json::json!(proxy);
         // Also set in git global config so git2-rs picks it up
-        if let Ok(mut git_cfg) = git2::Config::open_default() {
-            let _ = git_cfg.set_str("http.proxy", &proxy);
-        }
+        let _ = repo::set_global_proxy(&proxy);
     }
     save_config(&app_handle, &config)?;
-    crate::logger::log_event(&app_handle, "set_proxy_setting", &format!("proxy set to '{}'", if proxy.is_empty() { "none" } else { &proxy }));
+    crate::logger::log_event(
+        &app_handle,
+        "set_proxy_setting",
+        &format!("proxy set to '{}'", if proxy.is_empty() { "none" } else { &proxy }),
+    );
     Ok(())
 }
 
 #[tauri::command]
 pub fn git_list_conflicted(book_path: String) -> Result<Vec<String>, String> {
-    git::git_list_conflicted(&book_path)
+    repo::git_list_conflicted(&book_path).map_err(String::from)
 }
 
 #[tauri::command]
-pub fn attempt_merge(
-    book_path: String,
-    app_handle: tauri::AppHandle,
-) -> Result<String, String> {
+pub fn attempt_merge(book_path: String, app_handle: tauri::AppHandle) -> Result<String, String> {
     let bp = book_path.clone();
     run_git_and_emit(app_handle, "merge", book_path, move || {
-        let conflicted = git::git_attempt_merge(&bp)?;
+        let conflicted = with_book_lock(&bp, || repo::git_attempt_merge(&bp)).map_err(String::from)?;
         if conflicted.is_empty() {
             Ok("Merged successfully.".to_string())
         } else {
@@ -1893,37 +1794,22 @@ pub fn attempt_merge(
 }
 
 #[tauri::command]
-pub fn resolve_conflict(
-    book_path: String,
-    file_path: String,
-    use_theirs: bool,
-) -> Result<String, String> {
-    git::git_resolve_conflict(&book_path, &file_path, use_theirs)
+pub fn resolve_conflict(book_path: String, file_path: String, use_theirs: bool) -> Result<String, String> {
+    repo::git_resolve_conflict(&book_path, &file_path, use_theirs).map_err(String::from)
 }
 
 #[tauri::command]
-pub fn read_logs(
-    limit: usize,
-    app_handle: tauri::AppHandle,
-) -> Vec<serde_json::Value> {
+pub fn read_logs(limit: usize, app_handle: tauri::AppHandle) -> Vec<serde_json::Value> {
     crate::logger::read_logs(&app_handle, limit)
 }
 
 #[tauri::command]
-pub fn read_book_logs(
-    limit: usize,
-    book_path: String,
-    app_handle: tauri::AppHandle,
-) -> Vec<serde_json::Value> {
+pub fn read_book_logs(limit: usize, book_path: String, app_handle: tauri::AppHandle) -> Vec<serde_json::Value> {
     crate::logger::read_book_logs(&app_handle, limit, &book_path)
 }
 
 #[tauri::command]
-pub fn start_search(
-    book_paths: Vec<String>,
-    query: String,
-    app_handle: tauri::AppHandle,
-) -> Result<String, String> {
+pub fn start_search(book_paths: Vec<String>, query: String, app_handle: tauri::AppHandle) -> Result<String, String> {
     std::thread::spawn(move || {
         for book_path in &book_paths {
             // Read meta
@@ -2050,8 +1936,7 @@ pub fn export_site(
     assets: Vec<ExportAsset>,
 ) -> Result<ExportSummary, String> {
     let root = PathBuf::from(&output_dir);
-    fs::create_dir_all(&root)
-        .map_err(|e| format!("Failed to create output dir: {}", e))?;
+    fs::create_dir_all(&root).map_err(|e| format!("Failed to create output dir: {}", e))?;
 
     let mut files_written = 0;
     for file in &files {
@@ -2073,12 +1958,9 @@ pub fn export_site(
             Some(source) => {
                 let dest = root.join(safe_relative_path(&asset.dest)?);
                 if let Some(parent) = dest.parent() {
-                    fs::create_dir_all(parent)
-                        .map_err(|e| format!("Failed to create {}: {}", parent.display(), e))?;
+                    fs::create_dir_all(parent).map_err(|e| format!("Failed to create {}: {}", parent.display(), e))?;
                 }
-                fs::copy(&source, &dest).map_err(|e| {
-                    format!("Failed to copy {}: {}", source.display(), e)
-                })?;
+                fs::copy(&source, &dest).map_err(|e| format!("Failed to copy {}: {}", source.display(), e))?;
                 assets_copied += 1;
             }
             None => missing_assets.push(asset.src.clone()),
@@ -2143,9 +2025,27 @@ pub fn install_example_templates() -> Result<String, String> {
     }
     fs::create_dir_all(&dir).map_err(|e| format!("Failed to create template dir: {}", e))?;
     for (name, content) in EXAMPLE_TEMPLATES {
-        fs::write(dir.join(name), content)
-            .map_err(|e| format!("Failed to write {}: {}", name, e))?;
+        fs::write(dir.join(name), content).map_err(|e| format!("Failed to write {}: {}", name, e))?;
     }
     Ok(dir.to_string_lossy().to_string())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safe_relative_path_accepts_nested_relative_paths() {
+        assert_eq!(
+            safe_relative_path("assets/cover.png").unwrap(),
+            PathBuf::from("assets/cover.png")
+        );
+    }
+
+    #[test]
+    fn safe_relative_path_rejects_absolute_and_parent_traversal() {
+        assert!(safe_relative_path("/etc/passwd").is_err());
+        assert!(safe_relative_path("../outside.html").is_err());
+        assert!(safe_relative_path("a/../../b.html").is_err());
+    }
+}

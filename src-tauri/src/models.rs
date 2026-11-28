@@ -62,9 +62,66 @@ pub struct BookInfo {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CommitInfo {
     pub hash: String,
+    pub short_hash: String,
     pub message: String,
     pub author: String,
+    pub email: String,
     pub timestamp: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RepoFileStatus {
+    pub path: String,
+    pub code: String,
+    pub staged: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct RepoState {
+    pub initialized: bool,
+    pub branch: Option<String>,
+    pub detached: bool,
+    pub remote_url: Option<String>,
+    pub tracking: Option<String>,
+    pub ahead: u32,
+    pub behind: u32,
+    pub dirty: Vec<RepoFileStatus>,
+    pub conflicted: Vec<String>,
+    pub head: Option<CommitInfo>,
+    /// 最近一次 fetch 成功的秒级时间戳（取自 `.git/FETCH_HEAD` 的修改时间）。
+    pub last_sync_at: Option<u64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct BookIdentity {
+    pub local_name: Option<String>,
+    pub local_email: Option<String>,
+    pub global_name: Option<String>,
+    pub global_email: Option<String>,
+    pub effective_name: Option<String>,
+    pub effective_email: Option<String>,
+    /// `book` | `global` | `none`
+    pub source: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ActivityItem {
+    Commit {
+        hash: String,
+        short_hash: String,
+        message: String,
+        author: String,
+        email: String,
+        timestamp: u64,
+    },
+    Event {
+        timestamp: u64,
+        event: String,
+        detail: String,
+        result: String,
+        code: Option<String>,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
