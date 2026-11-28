@@ -2,9 +2,10 @@
  * 命令行导出静态站点（无需启动桌面应用）。
  *
  * 用法：
- *   npm run export -- --out ./site                 # 导出书库中的全部书
- *   npm run export -- --out ./site --books ~/gfbooks/算法,~/gfbooks/c
- *   npm run export -- --out ./site --all --root ~/gfbooks --lang en
+ *   npm run export -- --out ./site                 # 导出开发书库中的全部书
+ *   npm run export -- --out ./site --books ~/gfbooks-dev/算法,~/gfbooks-dev/c
+ *   npm run export -- --out ./site --all --root ~/gfbooks-dev --lang en
+ *   NODE_ENV=production npm run export -- --out ./site --root ~/gfbooks
  */
 import fs from 'node:fs'
 import os from 'node:os'
@@ -51,13 +52,20 @@ interface ExportAsset {
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
+function defaultBooksRoot(): string {
+  // 桌面应用的 debug 书库是 ~/gfbooks-dev；CLI 默认也跟随开发书库，
+  // 只有显式设置 NODE_ENV=production 或传 --root 时才落到正式书库。
+  const name = process.env.NODE_ENV === 'production' ? 'gfbooks' : 'gfbooks-dev'
+  return path.join(os.homedir(), name)
+}
+
 function usage(): string {
   return [
     '用法: npm run export -- --out <目录> [选项]',
     '',
     '选项:',
     '  --out <目录>     必填，站点输出目录',
-    '  --root <目录>    书库根目录，默认 ~/gfbooks',
+    '  --root <目录>    书库根目录，开发环境默认 ~/gfbooks-dev；NODE_ENV=production 时默认 ~/gfbooks',
     '  --books <路径>   要导出的书目录，逗号分隔，可重复',
     '  --all            导出书库根目录下的全部书（默认行为）',
     '  --lang <zh|en>   导出站点语言，默认 zh',
@@ -70,7 +78,7 @@ function usage(): string {
 function parseArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
     out: '',
-    root: path.join(os.homedir(), 'gfbooks'),
+    root: defaultBooksRoot(),
     books: [],
     all: false,
     lang: 'zh',

@@ -49,7 +49,11 @@ fn default_books_dir() -> PathBuf {
         .unwrap_or_else(|_| ".".to_string());
     // 开发构建使用独立书库，避免调试时的增删改污染日常使用的正式书库。
     if cfg!(debug_assertions) {
-        PathBuf::from(home).join("gfbooks-dev")
+        let dir = PathBuf::from(home).join("gfbooks-dev");
+        if let Err(err) = fs::create_dir_all(&dir) {
+            eprintln!("Failed to create dev books dir {}: {}", dir.display(), err);
+        }
+        dir
     } else {
         PathBuf::from(home).join("gfbooks")
     }
