@@ -27,6 +27,8 @@ export default ({ mode }) => {
     server: {
       host: '0.0.0.0',
       port: Number(process.env.VITE_APP_PORT || 1420),
+      // 端口被占用时直接失败，避免 Tauri 仍指向旧端口上的旧服务
+      strictPort: true,
     },
     base: process.env.NODE_ENV === 'production' ? process.env.VITE_BASENAME : '/',
   });

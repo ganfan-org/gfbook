@@ -10,6 +10,8 @@
     "preview": "vite preview",
     "export": "tsx scripts/export-site.mts",
     "tauri": "tauri",
+    "dev:clean": "bash scripts/dev-clean.sh",
+    "dev:stop": "bash scripts/debug-stop.sh",
     "books:clone": "bash scripts/clone-books.sh",
     "dev:isolated": "tauri dev --config src-tauri/tauri.dev.conf.json",
     "build:dev-app": "tauri build --debug --config src-tauri/tauri.dev.conf.json"
