@@ -2,7 +2,7 @@ import { ThemeProvider, CssBaseline, Snackbar, Button, Box } from '@mui/material
 import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { useSilentUpdater } from './hooks/useSilentUpdater'
+import { useUpdater } from './hooks/useUpdater'
 import BookDetail from './pages/BookDetail'
 import BookShelf from './pages/BookShelf'
 import { applyMode, buildTheme } from './theme/theme'
@@ -24,8 +24,7 @@ function systemMode(): ThemeMode {
 
 function App() {
   const { t } = useTranslation()
-  const { ready: updateReady, install: installUpdate, dismiss: dismissUpdate } =
-    useSilentUpdater()
+  const updater = useUpdater()
   const [mode, setMode] = useState<ThemeMode>(() => readSavedMode() ?? systemMode())
   const [currentBook, setCurrentBook] = useState<BookInfo | null>(null)
   const [pendingChapterId, setPendingChapterId] = useState<string | null>(null)
@@ -80,15 +79,15 @@ function App() {
         />
       )}
       <Snackbar
-        open={updateReady}
+        open={updater.status === 'ready'}
         message={t('updater.ready')}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         action={
           <Box sx={{ display: 'flex', gap: 1 }}>
-            <Button color="inherit" size="small" onClick={dismissUpdate}>
+            <Button color="inherit" size="small" onClick={updater.dismiss}>
               {t('updater.later')}
             </Button>
-            <Button color="inherit" size="small" onClick={installUpdate}>
+            <Button color="inherit" size="small" onClick={updater.install}>
               {t('updater.restart')}
             </Button>
           </Box>
