@@ -14,7 +14,9 @@
       "preRunCommands": [
         "platform shell bash ${workspaceFolder}/scripts/debug-build.sh"
       ],
-      "postDebugTask": "dev:clean-app",
+      "postRunCommands": [
+        "process handle SIGTERM -s false -n false -p true"
+      ],
       "sourceLanguages": [
         "rust"
       ]

@@ -30,6 +30,7 @@
         "cwd": "${workspaceFolder}"
       },
       "dependsOn": [
+        "dev:clean-app",
         "dev:build"
       ],
       "dependsOrder": "sequence",
