@@ -1,0 +1,19 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Tauri Dev (Rust, dev books)",
+      "program": "${workspaceFolder}/target/debug/GanfanBook",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "TAURI_CONFIG": "{\"productName\":\"Ganfan Book Dev\",\"identifier\":\"org.ganfan.app.gfbook.dev\"}"
+      },
+      "preLaunchTask": "vite:dev",
+      "sourceLanguages": [
+        "rust"
+      ]
+    }
+  ]
+}
