@@ -47,6 +47,7 @@ pub fn run() {
             git_push,
             git_ahead_behind,
             get_repo_state,
+            enable_version_control,
             get_book_identity,
             set_book_identity,
             get_book_activity,

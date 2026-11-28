@@ -15,7 +15,38 @@ use crate::models::{BookIdentity, CommitInfo, RepoFileStatus, RepoState};
 pub fn git_init(book_path: &str) -> Result<(), AppError> {
     Repository::init(book_path)
         .map(|_| ())
-        .map_err(|e| git_error("Failed to init git repo", e))
+        .map_err(|e| git_error("Failed to init Git repo", e))
+}
+
+/// 为书籍启用版本管理：初始化仓库并用当前生效身份创建初始提交。
+/// 没有任何可用身份时返回 `E_NO_IDENTITY`，不会留下没有提交的半成品仓库。
+/// 返回 `true` 表示本次新建了仓库或初始提交。
+pub fn enable_version_control(book_path: &str) -> Result<bool, AppError> {
+    let no_identity = || {
+        AppError::new(
+            "E_NO_IDENTITY",
+            "Set a Git user name and email before enabling version control",
+        )
+    };
+
+    if !is_repo(book_path) {
+        if global_identity().is_none() {
+            return Err(no_identity());
+        }
+        git_init(book_path)?;
+        git_commit(book_path, "chore: enable version control")?;
+        return Ok(true);
+    }
+
+    let repo = open_repo(book_path)?;
+    let has_commit = repo.head().ok().and_then(|head| head.peel_to_commit().ok()).is_some();
+    if has_commit {
+        return Ok(false);
+    }
+    if !initial_commit_if_identity(book_path, "chore: enable version control")? {
+        return Err(no_identity());
+    }
+    Ok(true)
 }
 
 pub fn is_repo(book_path: &str) -> bool {
@@ -25,9 +56,9 @@ pub fn is_repo(book_path: &str) -> bool {
 fn open_repo(book_path: &str) -> Result<Repository, AppError> {
     Repository::open(book_path).map_err(|e| {
         if e.code() == ErrorCode::NotFound {
-            AppError::new("E_NO_REPO", "This book is not a git repository")
+            AppError::new("E_NO_REPO", "This book is not a Git repository")
         } else {
-            git_error("Failed to open git repo", e)
+            git_error("Failed to open Git repo", e)
         }
     })
 }
@@ -99,7 +130,7 @@ fn read_identity(config: &git2::Config) -> Option<(String, String)> {
 fn local_identity_config(repo: &Repository) -> Result<git2::Config, AppError> {
     repo.config()
         .and_then(|config| config.open_level(ConfigLevel::Local))
-        .map_err(|e| git_error("Failed to read local git config", e))
+        .map_err(|e| git_error("Failed to read local Git config", e))
 }
 
 fn global_identity_config() -> Option<git2::Config> {
@@ -128,15 +159,15 @@ fn global_config_path() -> Option<std::path::PathBuf> {
 
 fn open_global_config_for_write() -> Result<git2::Config, AppError> {
     let path =
-        global_config_path().ok_or_else(|| AppError::new("E_NO_HOME", "Cannot resolve global git config path"))?;
+        global_config_path().ok_or_else(|| AppError::new("E_NO_HOME", "Cannot resolve global Git config path"))?;
     if !path.exists() {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| crate::error::io_error("Failed to create git config dir", e))?;
+                .map_err(|e| crate::error::io_error("Failed to create Git config dir", e))?;
         }
-        std::fs::write(&path, "").map_err(|e| crate::error::io_error("Failed to create git config", e))?;
+        std::fs::write(&path, "").map_err(|e| crate::error::io_error("Failed to create Git config", e))?;
     }
-    git2::Config::open(&path).map_err(|e| git_error("Failed to open global git config", e))
+    git2::Config::open(&path).map_err(|e| git_error("Failed to open global Git config", e))
 }
 
 pub fn global_user_config() -> Result<(String, String), AppError> {
@@ -233,7 +264,7 @@ fn get_signature(repo: &Repository) -> Result<Signature<'static>, AppError> {
     let identity = read_identity(&local_identity_config(repo)?).or_else(global_identity);
     let (name, email) =
         identity.ok_or_else(|| AppError::new("E_NO_IDENTITY", "Git user.name and user.email are not configured"))?;
-    Signature::now(&name, &email).map_err(|e| git_error("Invalid git signature", e))
+    Signature::now(&name, &email).map_err(|e| git_error("Invalid Git signature", e))
 }
 
 // ═══════════════════════════════════════════
@@ -285,6 +316,10 @@ pub fn initial_commit_if_identity(book_path: &str, message: &str) -> Result<bool
 
 pub fn git_log(book_path: &str, max_count: u32) -> Result<Vec<CommitInfo>, AppError> {
     let repo = open_repo(book_path)?;
+    log_commits(&repo, max_count)
+}
+
+fn log_commits(repo: &Repository, max_count: u32) -> Result<Vec<CommitInfo>, AppError> {
     let mut revwalk = repo.revwalk().map_err(|e| git_error("Failed to create revwalk", e))?;
     revwalk.push_head().map_err(|e| git_error("Failed to push head", e))?;
     revwalk
@@ -312,7 +347,7 @@ pub fn git_log(book_path: &str, max_count: u32) -> Result<Vec<CommitInfo>, AppEr
 fn status_entries(repo: &Repository) -> Result<Vec<RepoFileStatus>, AppError> {
     let statuses = repo
         .statuses(None)
-        .map_err(|e| git_error("Failed to read git status", e))?;
+        .map_err(|e| git_error("Failed to read Git status", e))?;
 
     let mut entries = Vec::new();
     for entry in statuses.iter() {
@@ -431,6 +466,7 @@ pub fn repo_state(book_path: &str) -> Result<RepoState, AppError> {
         .ok()
         .and_then(|head| head.peel_to_commit().ok())
         .map(|commit| commit_info(&commit));
+    let recent_commits = log_commits(&repo, 20).unwrap_or_default();
 
     Ok(RepoState {
         initialized: true,
@@ -443,6 +479,7 @@ pub fn repo_state(book_path: &str) -> Result<RepoState, AppError> {
         dirty,
         conflicted,
         head,
+        recent_commits,
         last_sync_at: last_sync_at(&repo),
     })
 }
@@ -529,7 +566,7 @@ pub fn git_pull(book_path: &str) -> Result<String, AppError> {
 
     let statuses = repo
         .statuses(None)
-        .map_err(|e| git_error("Failed to read git status", e))?;
+        .map_err(|e| git_error("Failed to read Git status", e))?;
     if statuses.iter().any(|status| status.status() != git2::Status::CURRENT) {
         git_commit(book_path, "auto-save before pull")?;
     }
@@ -550,7 +587,7 @@ pub fn git_pull(book_path: &str) -> Result<String, AppError> {
                     format!("No upstream configured for branch '{}'", branch),
                 ));
             }
-            let mut config = repo.config().map_err(|e| git_error("Failed to read git config", e))?;
+            let mut config = repo.config().map_err(|e| git_error("Failed to read Git config", e))?;
             config
                 .set_str(&format!("branch.{}.remote", branch), "origin")
                 .map_err(|e| git_error("Failed to set branch remote", e))?;
@@ -620,7 +657,7 @@ pub fn git_push(book_path: &str) -> Result<String, AppError> {
         .map_err(|e| git_error("Push failed", e))?;
 
     // 首次推送后写入 upstream，后续 ahead/behind 才有依据
-    let mut config = repo.config().map_err(|e| git_error("Failed to read git config", e))?;
+    let mut config = repo.config().map_err(|e| git_error("Failed to read Git config", e))?;
     config
         .set_str(&format!("branch.{}.remote", branch), "origin")
         .map_err(|e| git_error("Failed to set branch remote", e))?;
@@ -639,7 +676,7 @@ pub fn git_list_conflicted(book_path: &str) -> Result<Vec<String>, AppError> {
     let repo = open_repo(book_path)?;
     let statuses = repo
         .statuses(None)
-        .map_err(|e| git_error("Failed to read git status", e))?;
+        .map_err(|e| git_error("Failed to read Git status", e))?;
     Ok(statuses
         .iter()
         .filter(|entry| entry.status().contains(git2::Status::CONFLICTED))
@@ -765,13 +802,13 @@ pub fn git_resolve_conflict(book_path: &str, file_path: &str, use_theirs: bool) 
 
 pub fn git_get_proxy(book_path: &str) -> Result<String, AppError> {
     let repo = open_repo(book_path)?;
-    let config = repo.config().map_err(|e| git_error("Failed to read git config", e))?;
+    let config = repo.config().map_err(|e| git_error("Failed to read Git config", e))?;
     Ok(config.get_string("http.proxy").unwrap_or_default())
 }
 
 pub fn git_set_proxy(book_path: &str, proxy: &str) -> Result<(), AppError> {
     let repo = open_repo(book_path)?;
-    let mut config = repo.config().map_err(|e| git_error("Failed to read git config", e))?;
+    let mut config = repo.config().map_err(|e| git_error("Failed to read Git config", e))?;
     if proxy.is_empty() {
         let _ = config.remove("http.proxy");
     } else {
@@ -942,6 +979,29 @@ mod tests {
         isolated.set_global("Global User", "global@example.com");
         assert!(initial_commit_if_identity(&path_str(dir.path()), "init").unwrap());
         assert_eq!(git_log(&path_str(dir.path()), 10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn enable_version_control_requires_identity_then_creates_initial_commit() {
+        let isolated = IsolatedConfig::new();
+        let dir = tempfile::tempdir().unwrap();
+        let path = path_str(dir.path());
+        write_file(dir.path(), "note.md", "hello\n");
+
+        // 没有身份时明确失败，且不留下没有提交的半成品仓库
+        let error = enable_version_control(&path).unwrap_err();
+        assert_eq!(error.code, "E_NO_IDENTITY");
+        assert!(!is_repo(&path));
+
+        isolated.set_global("Global User", "global@example.com");
+        assert!(enable_version_control(&path).unwrap());
+        let log = git_log(&path, 10).unwrap();
+        assert_eq!(log.len(), 1);
+        assert_eq!(log[0].email, "global@example.com");
+
+        // 已经有提交时重复启用是空操作
+        assert!(!enable_version_control(&path).unwrap());
+        assert_eq!(git_log(&path, 10).unwrap().len(), 1);
     }
 
     #[test]

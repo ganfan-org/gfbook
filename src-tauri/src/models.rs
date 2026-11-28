@@ -88,6 +88,7 @@ pub struct RepoState {
     pub dirty: Vec<RepoFileStatus>,
     pub conflicted: Vec<String>,
     pub head: Option<CommitInfo>,
+    pub recent_commits: Vec<CommitInfo>,
     /// 最近一次 fetch 成功的秒级时间戳（取自 `.git/FETCH_HEAD` 的修改时间）。
     pub last_sync_at: Option<u64>,
 }

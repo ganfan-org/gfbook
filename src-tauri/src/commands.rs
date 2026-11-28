@@ -1421,12 +1421,27 @@ pub fn set_book_identity(
 ) -> Result<(), AppError> {
     repo::set_book_identity(&book_path, &name, &email)?;
     let detail = if name.trim().is_empty() {
-        "cleared book git identity".to_string()
+        "cleared book Git identity".to_string()
     } else {
-        format!("set book git identity: {} <{}>", name.trim(), email.trim())
+        format!("set book Git identity: {} <{}>", name.trim(), email.trim())
     };
     crate::logger::log_book_event(&app_handle, "set_book_identity", &detail, &book_path);
     Ok(())
+}
+
+/// 启用版本管理：初始化 Git 仓库并用当前生效身份创建初始提交，返回最新仓库状态。
+#[tauri::command]
+pub fn enable_version_control(book_path: String, app_handle: tauri::AppHandle) -> Result<RepoState, AppError> {
+    let created = with_book_lock(&book_path, || repo::enable_version_control(&book_path))?;
+    if created {
+        crate::logger::log_book_event(
+            &app_handle,
+            "enable_version_control",
+            "initialized Git repository",
+            &book_path,
+        );
+    }
+    repo::repo_state(&book_path)
 }
 
 /// 合并提交历史与应用事件，按时间倒序返回，供「操作记录」使用。
@@ -1460,11 +1475,25 @@ pub fn get_book_activity(
             .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
             .map(|time| time.timestamp().max(0) as u64)
             .unwrap_or(0);
+        let detail = value.get("d").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        // 旧日志没有单独的 result 字段，用明细前缀推断成功或失败
+        let result = value
+            .get("r")
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| {
+                let failed = detail.starts_with("failed:") || detail.starts_with("timed out") || detail == "crashed";
+                if failed {
+                    "failed".to_string()
+                } else {
+                    "ok".to_string()
+                }
+            });
         items.push(ActivityItem::Event {
             timestamp,
             event: value.get("e").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            detail: value.get("d").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            result: value.get("r").and_then(|v| v.as_str()).unwrap_or("ok").to_string(),
+            detail,
+            result,
             code: value.get("c").and_then(|v| v.as_str()).map(|v| v.to_string()),
         });
     }
@@ -1742,7 +1771,7 @@ pub fn set_global_git_user(name: String, email: String, app_handle: tauri::AppHa
     crate::logger::log_event(
         &app_handle,
         "set_global_git_user",
-        &format!("set git user: {} <{}>", name, email),
+        &format!("set Git user: {} <{}>", name, email),
     );
     Ok(())
 }
