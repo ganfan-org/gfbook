@@ -13,7 +13,8 @@ use crate::book_fs::{
 };
 use crate::error::AppError;
 use crate::models::{
-    flatten_chapters, ActivityItem, BookIdentity, BookInfo, BookKind, BookMeta, Chapter, CommitInfo, RepoState,
+    flatten_chapters, ActivityItem, BookIdentity, BookInfo, BookKind, BookMeta, Chapter, CommitInfo, FileDiff,
+    RepoState,
 };
 use crate::repo;
 
@@ -1405,6 +1406,13 @@ pub fn git_ahead_behind(book_path: String) -> Result<(u32, u32), String> {
 #[tauri::command]
 pub fn get_repo_state(book_path: String) -> Result<RepoState, AppError> {
     repo::repo_state(&book_path)
+}
+
+/// 读取单个改动文件相对 HEAD 的差异。
+#[tauri::command]
+pub fn get_file_diff(book_path: String, path: String) -> Result<FileDiff, AppError> {
+    let relative = safe_relative_path(&path).map_err(|e| AppError::new("E_INVALID_PATH", e))?;
+    repo::file_diff(&book_path, &relative.to_string_lossy())
 }
 
 #[tauri::command]

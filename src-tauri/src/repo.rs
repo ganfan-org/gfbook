@@ -1,12 +1,12 @@
 use std::path::Path;
 
 use git2::{
-    build::CheckoutBuilder, ConfigLevel, Cred, ErrorCode, FetchOptions, PushOptions, RemoteCallbacks, Repository,
-    Signature,
+    build::CheckoutBuilder, ConfigLevel, Cred, DiffFormat, DiffOptions, ErrorCode, FetchOptions, PushOptions,
+    RemoteCallbacks, Repository, Signature,
 };
 
 use crate::error::AppError;
-use crate::models::{BookIdentity, CommitInfo, RepoFileStatus, RepoState};
+use crate::models::{BookIdentity, CommitInfo, FileDiff, RepoFileStatus, RepoState};
 
 // ═══════════════════════════════════════════
 // 仓库基础
@@ -482,6 +482,72 @@ pub fn repo_state(book_path: &str) -> Result<RepoState, AppError> {
         recent_commits,
         last_sync_at: last_sync_at(&repo),
     })
+}
+
+/// 读取单个文件相对 HEAD 的文本差异（包含已暂存、未暂存与未跟踪改动）。
+pub fn file_diff(book_path: &str, path: &str) -> Result<FileDiff, AppError> {
+    let repo = open_repo(book_path)?;
+    let head_tree = repo.head().ok().and_then(|head| head.peel_to_tree().ok());
+
+    let mut opts = DiffOptions::new();
+    opts.pathspec(path);
+    opts.include_untracked(true);
+    opts.recurse_untracked_dirs(true);
+    opts.show_untracked_content(true);
+
+    let mut text = String::new();
+    let mut binary = false;
+    let mut truncated = false;
+
+    // 已暂存改动：HEAD -> index
+    if let Some(tree) = head_tree.as_ref() {
+        let staged = repo
+            .diff_tree_to_index(Some(tree), None, Some(&mut opts))
+            .map_err(|e| git_error("Failed to read file diff", e))?;
+        append_patch(&staged, &mut text, &mut binary, &mut truncated)?;
+    }
+
+    // 未暂存与未跟踪改动：index -> 工作区
+    let unstaged = repo
+        .diff_index_to_workdir(None, Some(&mut opts))
+        .map_err(|e| git_error("Failed to read file diff", e))?;
+    append_patch(&unstaged, &mut text, &mut binary, &mut truncated)?;
+
+    Ok(FileDiff {
+        path: path.to_string(),
+        diff: text,
+        binary,
+        truncated,
+    })
+}
+
+fn append_patch(
+    diff: &git2::Diff<'_>,
+    text: &mut String,
+    binary: &mut bool,
+    truncated: &mut bool,
+) -> Result<(), AppError> {
+    const LIMIT: usize = 400_000;
+    diff.print(DiffFormat::Patch, |delta, _hunk, line| {
+        if delta.flags().is_binary() {
+            *binary = true;
+        }
+        if line.origin() == 'B' {
+            return true;
+        }
+        let mut piece = String::new();
+        if matches!(line.origin(), '+' | '-' | ' ') {
+            piece.push(line.origin());
+        }
+        piece.push_str(&String::from_utf8_lossy(line.content()));
+        if text.len() + piece.len() > LIMIT {
+            *truncated = true;
+            return false;
+        }
+        text.push_str(&piece);
+        true
+    })
+    .map_err(|e| git_error("Failed to read file diff", e))
 }
 
 // ═══════════════════════════════════════════
@@ -1002,6 +1068,26 @@ mod tests {
         // 已经有提交时重复启用是空操作
         assert!(!enable_version_control(&path).unwrap());
         assert_eq!(git_log(&path, 10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn file_diff_reports_modified_and_untracked_files() {
+        let isolated = IsolatedConfig::new();
+        isolated.set_global("Global User", "global@example.com");
+        let dir = tempfile::tempdir().unwrap();
+        git_init(&path_str(dir.path())).unwrap();
+        write_file(dir.path(), "note.md", "old line\n");
+        commit(dir.path(), "initial");
+
+        write_file(dir.path(), "note.md", "new line\n");
+        let diff = file_diff(&path_str(dir.path()), "note.md").unwrap();
+        assert!(!diff.binary);
+        assert!(diff.diff.contains("-old line"));
+        assert!(diff.diff.contains("+new line"));
+
+        write_file(dir.path(), "draft.md", "fresh\n");
+        let diff = file_diff(&path_str(dir.path()), "draft.md").unwrap();
+        assert!(diff.diff.contains("+fresh"));
     }
 
     #[test]

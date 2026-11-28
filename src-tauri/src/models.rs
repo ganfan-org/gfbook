@@ -125,6 +125,15 @@ pub enum ActivityItem {
     },
 }
 
+/// 单个文件相对 HEAD 的文本差异。
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FileDiff {
+    pub path: String,
+    pub diff: String,
+    pub binary: bool,
+    pub truncated: bool,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SearchLine {
     pub line: usize,

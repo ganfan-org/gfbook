@@ -27,9 +27,10 @@ import type {
   ActivityCategory,
   ActivityItem,
   BookIdentity,
+  FileDiff,
   RepoState,
 } from '../types'
-import { formatInvokeError } from '../utils/commands'
+import { formatInvokeError, getFileDiff } from '../utils/commands'
 import { formatBookDate, formatRelativeTime } from '../utils/date'
 
 interface BookSettingsDialogProps {
@@ -99,6 +100,15 @@ function activityCategory(item: ActivityItem): ActivityCategory {
 function isFailed(item: ActivityItem): boolean {
   if (item.kind !== 'event') return false
   return item.result === 'error' || item.result === 'failed'
+}
+
+/** 差异行的语义颜色，保持与常见 diff 视图一致 */
+function diffLineColor(line: string): string {
+  if (line.startsWith('+++') || line.startsWith('---')) return 'text.secondary'
+  if (line.startsWith('@@')) return 'info.main'
+  if (line.startsWith('+')) return 'success.main'
+  if (line.startsWith('-')) return 'error.main'
+  return 'text.primary'
 }
 
 function SummaryRow({ label, value }: { label: string; value: ReactNode }) {
@@ -175,6 +185,11 @@ export default function BookSettingsDialog({
   const [enablingRepo, setEnablingRepo] = useState(false)
   const [enableError, setEnableError] = useState<string | null>(null)
   const [enableDone, setEnableDone] = useState(false)
+  const [diffFile, setDiffFile] = useState<string | null>(null)
+  const [fileDiff, setFileDiff] = useState<FileDiff | null>(null)
+  const [diffLoading, setDiffLoading] = useState(false)
+  const [diffError, setDiffError] = useState<string | null>(null)
+  const diffRequestRef = useRef(0)
 
   // 弹窗重新打开时同步书名草稿
   useEffect(() => {
@@ -182,6 +197,9 @@ export default function BookSettingsDialog({
     setRenameValue(bookTitle)
     setEnableError(null)
     setEnableDone(false)
+    setDiffFile(null)
+    setFileDiff(null)
+    setDiffError(null)
   }, [open, bookTitle])
 
   // 身份数据刷新后回填表单
@@ -228,6 +246,32 @@ export default function BookSettingsDialog({
       setEnableError(formatInvokeError(e))
     } finally {
       setEnablingRepo(false)
+    }
+  }
+
+  const handleToggleDiff = async (path: string) => {
+    const request = diffRequestRef.current + 1
+    diffRequestRef.current = request
+    if (diffFile === path) {
+      setDiffFile(null)
+      setFileDiff(null)
+      setDiffError(null)
+      setDiffLoading(false)
+      return
+    }
+    setDiffFile(path)
+    setFileDiff(null)
+    setDiffError(null)
+    setDiffLoading(true)
+    try {
+      const data = await getFileDiff(bookPath, path)
+      if (request === diffRequestRef.current) setFileDiff(data)
+    } catch (e) {
+      if (request === diffRequestRef.current) {
+        setDiffError(formatInvokeError(e))
+      }
+    } finally {
+      if (request === diffRequestRef.current) setDiffLoading(false)
     }
   }
 
@@ -657,44 +701,209 @@ export default function BookSettingsDialog({
                     {t('bookSettings.noChanges')}
                   </Typography>
                 ) : (
-                  <Box
-                    sx={{
-                      maxHeight: 140,
-                      overflow: 'auto',
-                      mb: 1,
-                      border: 1,
-                      borderColor: 'divider',
-                      borderRadius: 1,
-                      px: 1,
-                      py: 0.5,
-                    }}
-                  >
-                    {repoState.dirty.map((entry) => (
+                  <>
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      display="block"
+                      mb={0.5}
+                    >
+                      {t('bookSettings.diffHint')}
+                    </Typography>
+                    <Box
+                      sx={{
+                        maxHeight: 140,
+                        overflow: 'auto',
+                        mb: 1,
+                        border: 1,
+                        borderColor: 'divider',
+                        borderRadius: 1,
+                        px: 1,
+                        py: 0.5,
+                      }}
+                    >
+                      {repoState.dirty.map((entry) => (
+                        <Box
+                          key={`${entry.path}-${entry.code}`}
+                          component="button"
+                          type="button"
+                          onClick={() => handleToggleDiff(entry.path)}
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 1,
+                            width: '100%',
+                            py: 0.2,
+                            px: 0.25,
+                            border: 0,
+                            borderRadius: 0.5,
+                            bgcolor:
+                              diffFile === entry.path
+                                ? 'action.selected'
+                                : 'transparent',
+                            color: 'inherit',
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            fontFamily: 'var(--font-family-mono)',
+                            fontSize: '0.7rem',
+                            '&:hover': { bgcolor: 'action.hover' },
+                          }}
+                        >
+                          <Box
+                            component="span"
+                            sx={{ color: 'warning.main', flexShrink: 0 }}
+                          >
+                            {entry.code}
+                          </Box>
+                          <Box
+                            component="span"
+                            sx={{
+                              wordBreak: 'break-all',
+                              minWidth: 0,
+                              flex: 1,
+                            }}
+                          >
+                            {entry.path}
+                          </Box>
+                          <Box
+                            component="span"
+                            sx={{ color: 'text.secondary', flexShrink: 0 }}
+                          >
+                            {diffFile === entry.path ? '▾' : '▸'}
+                          </Box>
+                        </Box>
+                      ))}
+                    </Box>
+                    {diffFile && (
                       <Box
-                        key={`${entry.path}-${entry.code}`}
                         sx={{
-                          display: 'flex',
-                          gap: 1,
-                          py: 0.15,
-                          fontFamily: 'var(--font-family-mono)',
-                          fontSize: '0.7rem',
+                          mb: 1,
+                          border: 1,
+                          borderColor: 'divider',
+                          borderRadius: 1,
+                          overflow: 'hidden',
                         }}
                       >
                         <Box
-                          component="span"
-                          sx={{ color: 'warning.main', flexShrink: 0 }}
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 1,
+                            px: 1,
+                            py: 0.3,
+                            bgcolor: 'action.hover',
+                          }}
                         >
-                          {entry.code}
+                          <Typography
+                            variant="caption"
+                            sx={{
+                              flex: 1,
+                              minWidth: 0,
+                              fontFamily: 'var(--font-family-mono)',
+                              fontSize: '0.68rem',
+                              wordBreak: 'break-all',
+                            }}
+                          >
+                            {diffFile}
+                          </Typography>
+                          <Button
+                            size="small"
+                            aria-label={t('common.close')}
+                            onClick={() => handleToggleDiff(diffFile)}
+                            sx={{
+                              minWidth: 0,
+                              px: 0.5,
+                              py: 0,
+                              fontSize: '0.8rem',
+                              lineHeight: 1,
+                            }}
+                          >
+                            ×
+                          </Button>
                         </Box>
-                        <Box
-                          component="span"
-                          sx={{ wordBreak: 'break-all', minWidth: 0 }}
-                        >
-                          {entry.path}
-                        </Box>
+                        {diffLoading ? (
+                          <Box
+                            sx={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 1,
+                              px: 1,
+                              py: 1,
+                            }}
+                          >
+                            <CircularProgress size={14} />
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                            >
+                              {t('common.loading')}
+                            </Typography>
+                          </Box>
+                        ) : diffError ? (
+                          <Alert severity="error" sx={{ borderRadius: 0 }}>
+                            {diffError}
+                          </Alert>
+                        ) : fileDiff?.binary ? (
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            display="block"
+                            sx={{ px: 1, py: 1 }}
+                          >
+                            {t('bookSettings.diffBinary')}
+                          </Typography>
+                        ) : fileDiff && fileDiff.diff.trim() ? (
+                          <>
+                            {fileDiff.truncated && (
+                              <Alert
+                                severity="warning"
+                                sx={{ borderRadius: 0 }}
+                              >
+                                {t('bookSettings.diffTruncated')}
+                              </Alert>
+                            )}
+                            <Box
+                              component="pre"
+                              sx={{
+                                m: 0,
+                                p: 1,
+                                maxHeight: 280,
+                                overflow: 'auto',
+                                bgcolor: 'background.default',
+                                fontSize: '0.66rem',
+                                lineHeight: 1.45,
+                              }}
+                            >
+                              {fileDiff.diff
+                                .split('\n')
+                                .map((line, index) => (
+                                  <Box
+                                    component="span"
+                                    key={index}
+                                    sx={{
+                                      display: 'block',
+                                      whiteSpace: 'pre',
+                                      color: diffLineColor(line),
+                                    }}
+                                  >
+                                    {line || ' '}
+                                  </Box>
+                                ))}
+                            </Box>
+                          </>
+                        ) : (
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            display="block"
+                            sx={{ px: 1, py: 1 }}
+                          >
+                            {t('bookSettings.diffEmpty')}
+                          </Typography>
+                        )}
                       </Box>
-                    ))}
-                  </Box>
+                    )}
+                  </>
                 )}
 
                 {repoState.dirty.length > 0 && (

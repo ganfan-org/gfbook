@@ -87,3 +87,11 @@ export type ActivityItem =
     };
 
 export type ActivityCategory = 'commit' | 'chapter' | 'git' | 'image' | 'other';
+
+/** 单个文件相对 HEAD 的差异 */
+export interface FileDiff {
+  path: string;
+  diff: string;
+  binary: boolean;
+  truncated: boolean;
+}

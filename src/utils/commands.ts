@@ -8,6 +8,7 @@ import type {
   BookMeta,
   Chapter,
   CommitInfo,
+  FileDiff,
   RepoState,
 } from '../types'
 
@@ -220,6 +221,11 @@ export function getRepoState(bookPath: string): Promise<RepoState> {
 /** 为书籍启用版本管理：初始化仓库并用当前生效身份创建初始提交 */
 export function enableVersionControl(bookPath: string): Promise<RepoState> {
   return invoke('enable_version_control', { bookPath })
+}
+
+/** 读取单个改动文件相对 HEAD 的差异 */
+export function getFileDiff(bookPath: string, path: string): Promise<FileDiff> {
+  return invoke('get_file_diff', { bookPath, path })
 }
 
 /** 合并提交历史与应用事件，按时间倒序 */
